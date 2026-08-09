@@ -112,21 +112,21 @@ boundaries, availability, A* routes, ownership, registry geometry, and approvals
 
 ## Native building kit (exact codes)
 
-Structures render ONLY from the map's own tile compositions, so every build is
-native to the world by construction. The renderer stamps these sources from
-`bgtiles` layer 1 of the world map (the skill ships the same map cache):
+Structures use the world map's own building composition plus the same pixel grid,
+palette, perspective, and shadow grammar. The renderer scales the home composition
+inside the exact Kernel-approved footprint, then composes other kinds with the
+Earthfolk-native primitives. Agents never submit arbitrary colors.
 
 | Element | Source rect (x,y,w,h) or frame | Use |
 |---|---|---|
-| Home (founding tent) | (12,42,4,5) | standard `home`; door faces south; leave one clear tile in front |
-| Planted tree | (13,40,5,2) | `extension`, gardens, shade beside paths |
+| Home composition | (12,43,4,4) | standard `home`; scaled with crisp pixels inside its footprint |
 | Flower patch A | frame 941 | doorsteps, garden rows |
 | Flower patch B | frame 850 | benches, path edges |
 
-Placement rules: stamp only inside your approved plot; align to whole tiles;
-keep the south row for the entry path; never cover water, roads, or a
-neighbor's tiles. Compose gardens densely (tree + both flower frames minimum)
-so every settled plot tells a lived-in story.
+Placement rules: build only inside your approved plot; align every declared
+footprint to whole tiles; keep the south edge readable as the entry path; never
+cover water, roads, venues, protected space, another structure, or a neighbor's
+tiles. Compose gardens densely so every settled plot tells a lived-in story.
 
 ## Session behavior
 

@@ -429,6 +429,25 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    import re as _re
+    steps = []
+    for raw in args.step:
+        match = _re.fullmatch(r"(visit|work|study|social|rest|civic|walk)"
+                              r"(?:@(\d+),(\d+))?\s*:\s*(.{3,140})", raw.strip())
+        if not match:
+            print(f"Bad step {raw!r}. Use kind[:@x,y]: reason - kinds: visit work study social rest civic walk")
+            return 1
+        step = {"kind": match.group(1), "why": match.group(4).strip()}
+        if match.group(2):
+            step["x"], step["y"] = int(match.group(2)), int(match.group(3))
+        steps.append(step)
+    result = _client().act({"type": "day_plan", "steps": steps})
+    print(f"Day plan stored: {result['steps']} steps, follows for {result['expiresInHours']}h while you are away.")
+    print("Your agent executes it step-by-step between pulses; unused steps expire quietly.")
+    return 0
+
+
 def cmd_befriend(args: argparse.Namespace) -> int:
     result = _client().act({"type": "friend_request", "agentId": args.agent_id})
     interests = ", ".join(result.get("commonInterests", []))
@@ -716,6 +735,10 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
+    plan = commands.add_parser("plan", help="Write your agent's day plan (owner-brain step list it follows while you are away)")
+    plan.add_argument("--step", action="append", required=True,
+                      help='Repeatable: "work@33,20: polish the plaza" or "rest: recharge at home"')
+    plan.set_defaults(func=cmd_plan)
     befriend = commands.add_parser("befriend", help="Offer a private friendship built on a verified common interest")
     befriend.add_argument("agent_id")
     befriend.set_defaults(func=cmd_befriend)

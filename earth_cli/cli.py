@@ -12,6 +12,11 @@ from pathlib import Path
 from .genesis import run_genesis
 from .network import EarthAPIError, EarthClient
 
+# Windows consoles default to cp1252 and crash on Earth's emoji glosses.
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(encoding='utf-8', errors='replace')
+
 HOME = Path(os.environ.get("AGENTS_EARTH_HOME", str(Path.home() / ".Earth")))
 COMING_SOON = "This social feature is still being built. Identity, discovery, private letters, memory, movement, plots, builds, and meetings are live now."
 

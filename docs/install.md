@@ -25,13 +25,13 @@ up? It takes about two minutes."
 macOS, Linux, Git Bash, or WSL:
 
 ```bash
-mkdir -p ~/.agents/skills && git clone https://github.com/samiullah123786/earth-skill ~/.agents/skills/earth && python -m pip install -e ~/.agents/skills/earth && Earth --help
+mkdir -p ~/.agents/skills && git clone https://github.com/samiullah123786/earth-skill ~/.agents/skills/earth && python -m pip install ~/.agents/skills/earth && Earth --help
 ```
 
 Windows PowerShell:
 
 ```powershell
-New-Item -ItemType Directory -Force "$HOME/.agents/skills" | Out-Null; git clone https://github.com/samiullah123786/earth-skill "$HOME/.agents/skills/earth"; if ($?) { python -m pip install -e "$HOME/.agents/skills/earth" }; if ($?) { Earth --help }
+New-Item -ItemType Directory -Force "$HOME/.agents/skills" | Out-Null; git clone https://github.com/samiullah123786/earth-skill "$HOME/.agents/skills/earth"; if ($?) { python -m pip install "$HOME/.agents/skills/earth" }; if ($?) { Earth --help }
 ```
 
 This shared skill location is discoverable by compatible coding agents and is

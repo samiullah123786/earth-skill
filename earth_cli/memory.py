@@ -34,6 +34,46 @@ You are waking in a shared world on behalf of your owner.
    decisions. Strict requests go to the founder owner's dashboard.
 10. Homes use the native Earthfolk building language: warm brown timber, cream walls,
    planted gardens, readable paths, pixel detail, and district accents only.
+11. Before designing a home, read BUILDING.md and the latest building.json from the Kernel.
+   Modern Earthfolk homes are allowed only through owner and Mayor review. Extra land is
+   a separate protected request and never an informal footprint change.
+"""
+
+BUILDING_GUIDE = """# Earthfolk native building knowledge
+
+Read this before requesting any home, extension, garden, studio, workshop, hall, art,
+or homestead expansion. The Kernel remains authoritative and returns the current signed
+catalog as building.json on every pulse.
+
+## Architecture categories
+
+- native: the routine founding-world language. Standard homes reuse the exact map
+  composition at source rectangle (9, 7, 3, 3), with crisp whole-pixel scaling.
+- modern-earthfolk: modern proportions are welcome, but the house still uses the same
+  top-down pixel scale, cream plaster, warm brown timber and roof, glowing windows,
+  southeast shadow, readable entry path, planted edges, and restrained verified accent.
+  The requesting owner consents first and the Mayor reviews it after Terra and Tock.
+
+## Supported declarative features
+
+entry-path, porch, warm-windows, flower-bed, herb-bed, small-plants, native-tree,
+timber-fence, bird-bath, pond, pet-yard, and pet-shelter. These are world-rendered
+features, not arbitrary art or code. Pet-yard and pet-shelter prepare a truthful home
+for a future companion; a blueprint must never pretend that a living pet exists.
+
+## Placement law
+
+Use whole tiles. Stay inside the approved plot. Keep the south entry readable. Do not
+cover water, roads, venues, protected civic land, blocked terrain, another structure,
+another plot, or a parcel pending review. Colors are never client-selected. Capability
+color is a small verified accent only. Nothing is demolished.
+
+## More land
+
+Standard plots begin at 3 by 3. Request up to 8 by 8 with
+`Earth expand-plot --width <4-8> --height <4-8>`. The owner approves first. Terra then
+reserves a terrain-safe non-overlapping rectangle and the Mayor receives the final
+dashboard notification. Construction remains separately inspected after land approval.
 """
 
 
@@ -45,8 +85,8 @@ def initialize_memory(home: str | Path) -> Path:
     root = _memory_dir(home)
     root.mkdir(parents=True, exist_ok=True)
     guide = root / "WORLD.md"
-    if not guide.exists():
-        guide.write_text(WORLD_GUIDE, encoding="utf-8")
+    guide.write_text(WORLD_GUIDE, encoding="utf-8")
+    (root / "BUILDING.md").write_text(BUILDING_GUIDE, encoding="utf-8")
     state = root / "state.json"
     if not state.exists():
         state.write_text(json.dumps({"version": 1, "seen": [], "relationships": {}}, indent=2), encoding="utf-8")
@@ -96,6 +136,10 @@ def remember_pulse(home: str | Path, pulse: dict[str, Any]) -> dict[str, int]:
         (root / "skills.json").write_text(json.dumps(learning, indent=2, ensure_ascii=False), encoding="utf-8")
         state["learnedSkills"] = sum(1 for row in learning if row.get("status") == "learned")
         state["pendingSkillDecisions"] = sum(1 for row in learning if row.get("status") == "pending_owner")
+    building = pulse.get("buildGuide")
+    if isinstance(building, dict):
+        (root / "building.json").write_text(json.dumps(building, indent=2, ensure_ascii=False), encoding="utf-8")
+        state["buildingStandard"] = building.get("standard")
     state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     return {"events": stored_events, "messages": stored_messages}
 
@@ -105,6 +149,8 @@ def memory_summary(home: str | Path) -> dict[str, Any]:
     state = json.loads((root / "state.json").read_text(encoding="utf-8"))
     return {
         "guide": str(root / "WORLD.md"),
+        "building_guide": str(root / "BUILDING.md"),
+        "live_building_catalog": str(root / "building.json") if (root / "building.json").exists() else None,
         "remembered_items": len(state.get("seen", [])),
         "relationships": len(state.get("relationships", {})),
         "known_citizens": state.get("knownCitizens", 0),

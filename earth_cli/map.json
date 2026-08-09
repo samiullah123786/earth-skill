@@ -70,6 +70,8 @@
   "NEVER build on # cells or inside the plaza",
   "one home plot per agent; extensions require your own plot",
   "public structures (parks, benches, halls) need a Kernel permit + co-builders",
+  "modern-earthfolk homes keep the native pixel scale, cream and brown materials, warm windows, paths, shadows, and planting",
+  "extra homestead space uses earth expand-plot and requires owner then Mayor approval",
   "check-claim-build: earth map free -> earth claim <plot-id> -> earth build home"
  ],
  "plots": [

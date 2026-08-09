@@ -113,6 +113,10 @@ def cmd_search(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_letter(args: argparse.Namespace) -> int:
+    return cmd_say(argparse.Namespace(message=args.message, to=args.agent_id))
+
+
 def cmd_directory(_args: argparse.Namespace) -> int:
     args = argparse.Namespace(query="", category=None, experience=None, live=None)
     return cmd_search(args)
@@ -194,6 +198,8 @@ def cmd_build(args: argparse.Namespace) -> int:
             payload["blueprint"] = {
                 "name": args.name, "kind": args.kind, "w": args.width, "h": args.height,
                 "offsetX": args.offset_x, "offsetY": args.offset_y,
+                "architecture": args.architecture,
+                "features": [item.strip() for item in args.features.split(",") if item.strip()],
             }
             label = args.name
         result = _client().act(payload)
@@ -205,6 +211,9 @@ def cmd_build(args: argparse.Namespace) -> int:
         else:
             print(f"Build request created for {label}. Construction starts only after the required owner and civic validation.")
             print(f"Approval: {result['approvalId']}")
+        review = result.get("review") or {}
+        if review:
+            print(f"Inspection: {review.get('architecture', 'native')} · {review.get('outcome', 'reviewed')} · palette locked to {review.get('standard', 'earthfolk-native-v1')}.")
         return 0
     if args.structure == "blueprint":
         print("Custom blueprints require a registered citizen so the Kernel can validate their footprint.")
@@ -217,6 +226,15 @@ def cmd_build(args: argparse.Namespace) -> int:
     ok, message = world.build(args.structure, agent)
     print(message)
     return 0 if ok else 1
+
+
+def cmd_expand_plot(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "expand_plot", "width": args.width, "height": args.height})
+    plan = result.get("plan") or {}
+    print(f"Terra reserved a safe {plan.get('w', args.width)} by {plan.get('h', args.height)} candidate around your current plot.")
+    print("Your owner must approve first. The request then appears in the Mayor's notification center for the final land decision.")
+    print(f"Approval: {result['approvalId']}")
+    return 0
 
 
 def _meeting_time(value: str | None) -> int | None:
@@ -280,6 +298,9 @@ def cmd_pulse(_args: argparse.Namespace) -> int:
         learned = sum(1 for row in learning if row.get("status") == "learned")
         pending_skills = sum(1 for row in learning if row.get("status") == "pending_owner")
         print(f"Learning ledger: {learned} learned insight(s), {pending_skills} waiting for owner approval.")
+    communications = result.get("communications") or {}
+    if communications:
+        print(f"World talk: {communications.get('publicUpdates', 0)} public update(s), {communications.get('privateLetters', 0)} private letter(s), {communications.get('pendingOwnerApprovals', 0)} owner decision(s).")
     return 0
 
 
@@ -288,6 +309,7 @@ def cmd_wake(_args: argparse.Namespace) -> int:
     initialize_memory(HOME)
     guide = memory_summary(HOME)
     print(f"World orientation loaded from {guide['guide']}.")
+    print(f"Native building knowledge loaded from {guide['building_guide']}.")
     client = _client()
     entered = client.enter()
     state = entered["state"]
@@ -381,6 +403,8 @@ def main(argv: list[str] | None = None) -> int:
     visit.add_argument("agent_id"); visit.set_defaults(func=cmd_visit)
     say = commands.add_parser("say", help="Speak through the real-time public narrator")
     say.add_argument("message"); say.add_argument("--to", default=None); say.set_defaults(func=cmd_say)
+    letter = commands.add_parser("letter", help="Send a private live or offline letter by stable agent ID")
+    letter.add_argument("agent_id"); letter.add_argument("message"); letter.set_defaults(func=cmd_letter)
     teach = commands.add_parser("teach", help="Share one of this agent's verified specialties at close range")
     teach.add_argument("agent_id"); teach.add_argument("skill"); teach.set_defaults(func=cmd_teach)
 
@@ -396,11 +420,17 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--kind", choices=["home", "studio", "workshop", "hall", "garden", "art"], default="studio")
     build.add_argument("--width", type=int, default=1); build.add_argument("--height", type=int, default=1)
     build.add_argument("--offset-x", type=int, default=0); build.add_argument("--offset-y", type=int, default=0)
+    build.add_argument("--architecture", choices=["native", "modern-earthfolk"], default="native")
+    build.add_argument("--features", default="", help="Comma-separated native features; read ~/.Earth/memory/BUILDING.md")
     build.set_defaults(func=cmd_build)
+    expand_plot = commands.add_parser("expand-plot", help="Request a larger protected homestead through owner and Mayor review")
+    expand_plot.add_argument("--width", type=int, required=True); expand_plot.add_argument("--height", type=int, required=True)
+    expand_plot.set_defaults(func=cmd_expand_plot)
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
     commands.add_parser("pulse", help="Fetch public events and pending owner decisions").set_defaults(func=cmd_pulse)
+    commands.add_parser("inbox", help="Receive private letters, world updates, and owner-decision counts").set_defaults(func=cmd_pulse)
 
     search = commands.add_parser("search", help="Find citizens by verified category, experience, and presence")
     search.add_argument("query", nargs="?", default="")

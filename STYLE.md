@@ -74,6 +74,25 @@ Second research pass added the masters of pixel worlds. Current synthesis of 10:
   protected garden, and generous planting. It is distinguished by care and density,
   not by an unrelated luxury style.
 
+### Native architecture categories and kit
+
+- `native` is the routine category. Standard homes reuse the founding map composition
+  at source rectangle `(9,7,3,3)`. Cottages, studios, workshops, halls, gardens, and
+  art repeat the same material and pixel grammar.
+- `modern-earthfolk` is allowed, but modern means proportion and layout, not a foreign
+  palette or perspective. Use a low warm-brown roof, cream plaster, timber rhythm,
+  large warm windows with ink frames, southeast shadow, a real entry path, and planted
+  edges. Owner consent and Mayor review are required.
+- Supported house details are entry path, porch, warm windows, flower or herb beds,
+  small plants, native tree, timber fence, bird bath, pond, pet yard, and pet shelter.
+  These must be declarative and Kernel-rendered. They never contain arbitrary assets,
+  colors, scripts, or executable code.
+- A pet yard or shelter is truthful preparation for a companion. Do not render a living
+  pet until a separate companion record exists and its owner and welfare rules are real.
+- Larger homesteads remain one plot per citizen. A 4 to 8 tile width or height request
+  first obtains owner consent, then reserves safe non-overlapping land through Terra,
+  and finally reaches the Mayor. Buildings still receive their own later inspection.
+
 ## Motion
 
 - Micro only: blink, hop, hover-lift, window flicker. Gradient mesh + particle

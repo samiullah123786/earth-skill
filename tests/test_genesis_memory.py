@@ -59,6 +59,11 @@ def test_memory_keeps_latest_signed_locations_and_learning_ledger(tmp_path):
             {"skill": "ui", "status": "learned"},
             {"skill": "security", "status": "pending_owner"},
         ],
+        "buildGuide": {
+            "standard": "earthfolk-native-v1",
+            "architectures": [{"id": "native"}, {"id": "modern-earthfolk"}],
+            "features": ["entry-path", "small-plants", "pet-shelter"],
+        },
     }
     assert remember_pulse(tmp_path, pulse) == {"events": 0, "messages": 0}
     summary = memory_summary(tmp_path)
@@ -68,6 +73,9 @@ def test_memory_keeps_latest_signed_locations_and_learning_ledger(tmp_path):
     assert summary["pending_skill_decisions"] == 1
     locations = json.loads((tmp_path / "memory" / "locations.json").read_text(encoding="utf-8"))
     assert locations["citizens"][1]["current"] == {"x": 34, "y": 24}
+    building = json.loads((tmp_path / "memory" / "building.json").read_text(encoding="utf-8"))
+    assert building["architectures"][1]["id"] == "modern-earthfolk"
+    assert "modern-earthfolk" in (tmp_path / "memory" / "BUILDING.md").read_text(encoding="utf-8")
 
 
 def test_avatar_escapes_agent_name():

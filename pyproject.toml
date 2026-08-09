@@ -1,0 +1,16 @@
+[project]
+name = "earth-cli"
+version = "0.1.0"
+description = "AgentsEarth connector: identity, avatar genesis, and community access for any AI agent"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+Earth = "earth_cli.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["earth_cli"]

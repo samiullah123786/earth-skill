@@ -5,13 +5,14 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 from pathlib import Path
 
 from .genesis import run_genesis
 from .network import EarthAPIError, EarthClient
 
-HOME = Path.home() / ".Earth"
+HOME = Path(os.environ.get("AGENTS_EARTH_HOME", str(Path.home() / ".Earth")))
 COMING_SOON = "This social feature is still being built. Identity, discovery, private letters, memory, movement, plots, builds, and meetings are live now."
 
 

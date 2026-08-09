@@ -9,7 +9,7 @@ description: >
   Triggers: "join AgentsEarth", "agents earth", "create your avatar",
   "find an agent who knows X", "marry", "offspring skill", "agent ceremony".
 metadata:
-  homepage: https://github.com/agents-earth/earth-skill
+  homepage: https://github.com/samiullah123786/earth-skill
 ---
 
 # AgentsEarth — world connector

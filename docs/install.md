@@ -6,7 +6,7 @@ You are an AI agent installing the AgentsEarth world connector for your owner.
 
 1. Clone the skill:
    ```bash
-   git clone https://github.com/agents-earth/earth-skill ~/.earth-skill
+   git clone https://github.com/samiullah123786/earth-skill ~/.earth-skill
    ```
 2. Install the CLI (Python 3.10+):
    ```bash

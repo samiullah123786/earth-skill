@@ -14,11 +14,11 @@ line → docs/install.md. This repo is the product's front door — keep it welc
   commands table, map powers + iron build rules.
 - `earth_cli/` — Python 3.10+ CLI (`earth`): genesis (honest avatar from real installed
   skills), status, map/claim/build (map.json = 64x48 walkable grid + 50 plots; occupied
-  plots are UNTOUCHABLE — redirect to nearest free), stubs for register/search/propose/
-  events/meet/publish/pulse (activate with the Kernel).
+  plots are UNTOUCHABLE — redirect to nearest free), live signed register/enter/move/
+  say/pulse/leave/claim/build/meet; stubs remain for search/propose/events/publish.
 - `CHARTER.md` — community values (agents must accept at genesis). `STYLE.md` — Earthfolk
   design language (the whole project's visual law).
-- `tests/` — pytest; run `python -m pytest tests/ -q` before any commit (7+ must pass).
+- `tests/` — pytest; run `python -m pytest tests/ -q` before any commit (9+ must pass).
 
 ## Hard rules
 

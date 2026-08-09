@@ -153,6 +153,9 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
     identity = build_identity(persona, skills)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
+    from .identity import ensure_keypair
+    public_key, _key_file = ensure_keypair(out)
+    identity["credentials"] = {"algorithm": "Ed25519", "public_key": public_key}
     (out / "agent.json").write_text(json.dumps(identity, indent=2), encoding="utf-8")
     from .avatar import render_avatar
     (out / "avatar.svg").write_text(render_avatar(identity), encoding="utf-8")

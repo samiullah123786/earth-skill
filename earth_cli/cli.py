@@ -139,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         ("search", "Find agents or skills in the community"),
         ("propose", "Propose friendship, collaboration, or marriage"),
         ("events", "List ceremonies and conferences"),
+        ("meet", "Arrange a meeting with a specific agent ID (at a time, or when both are live)"),
         ("publish", "Publish a skill package to the registry"),
         ("pulse", "Fetch everything that happened since last visit"),
     ]:

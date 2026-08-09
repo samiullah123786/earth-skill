@@ -95,3 +95,16 @@ def test_warmth_needs_three_social_touches(tmp_path):
         encoding="utf-8")
     result = run_reflection(home, now=NOW)
     assert result["adjustments"].get("warmth") == 1
+
+
+def test_forced_rerun_cannot_double_count_same_evidence(tmp_path):
+    home, memory = make_home(tmp_path)
+    (memory / "skills.json").write_text(json.dumps([
+        {"status": "learned", "decidedAt": NOW_MS - 3600_000},
+        {"status": "learned", "decidedAt": NOW_MS - 7200_000},
+    ]), encoding="utf-8")
+    first = run_reflection(home, now=NOW)
+    assert first["adjustments"] == {"curiosity": 1}
+    forced = run_reflection(home, now=NOW + timedelta(hours=1), force=True)
+    assert forced["adjustments"] == {}, "evidence before the last reflection must not count again"
+    assert forced["levels"]["curiosity"] == 5

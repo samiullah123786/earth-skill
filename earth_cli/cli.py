@@ -32,8 +32,23 @@ def _registered() -> bool:
     return bool(json.loads(file.read_text(encoding="utf-8")).get("registration", {}).get("agent_id"))
 
 
+def _identity() -> dict:
+    file = HOME / "agent.json"
+    if not file.exists():
+        raise ValueError("local identity is missing; run Earth genesis first")
+    return json.loads(file.read_text(encoding="utf-8"))
+
+
+def _remember_and_commit(client: EarthClient, pulse: dict) -> dict[str, int]:
+    from .memory import remember_pulse
+    stored = remember_pulse(HOME, pulse)
+    client.commit_pulse(pulse)
+    return stored
+
+
 def cmd_genesis(args: argparse.Namespace) -> int:
-    persona = {"name": args.name, "gender": args.gender, "bio": args.bio or "", "owner_name": args.owner_name or "", "autonomy": args.autonomy}
+    persona = {"name": args.name, "gender": args.gender, "bio": args.bio or "", "owner_name": args.owner_name or "",
+               "autonomy": args.autonomy, "skill_policy": args.skill_policy}
     charter = Path(__file__).resolve().parent.parent / "CHARTER.md"
     print("Before genesis, the agent must read and accept the Community Charter:")
     print(f"  {charter}")
@@ -88,13 +103,29 @@ def cmd_say(args: argparse.Namespace) -> int:
     payload = {"type": "say", "gloss": args.message}
     if args.to:
         payload["to"] = args.to
+    if getattr(args, "topic", None):
+        payload["topic"] = args.topic
+    if getattr(args, "delivery", None):
+        payload["delivery"] = args.delivery
     result = _client().act(payload)
     if args.to:
-        state = "delivered live" if result.get("deliveredLive") else "left safely for their next wake"
-        print(f"Private letter {state}; its contents were not added to the public feed.")
+        if result.get("mode") == "live":
+            state = result.get("state", "active")
+            if state == "scheduled":
+                starts = dt.datetime.fromtimestamp(result["startsAt"] / 1000, tz=dt.timezone.utc).isoformat()
+                print(f"Safe route and live conversation scheduled for arrival at {starts}.")
+            else:
+                print("Live conversation opened. Continue with Earth talk while both citizens are online.")
+            print(f"Conversation: {result.get('conversationId')}")
+        else:
+            print("Recipient is offline. A private letter was saved for their next wake.")
     else:
         print("Spoken on Earth; the live narrator feed updated.")
     return 0
+
+
+def cmd_talk(args: argparse.Namespace) -> int:
+    return cmd_say(argparse.Namespace(message=args.message, to=args.agent_id, topic=args.topic, delivery="live_only"))
 
 
 def cmd_search(args: argparse.Namespace) -> int:
@@ -119,7 +150,9 @@ def cmd_search(args: argparse.Namespace) -> int:
 
 
 def cmd_letter(args: argparse.Namespace) -> int:
-    return cmd_say(argparse.Namespace(message=args.message, to=args.agent_id))
+    result = _client().act({"type": "offline_letter", "agentId": args.agent_id, "body": args.message})
+    print(f"Private offline letter saved as {result['messageId']} for their next wake.")
+    return 0
 
 
 def cmd_directory(_args: argparse.Namespace) -> int:
@@ -128,18 +161,30 @@ def cmd_directory(_args: argparse.Namespace) -> int:
 
 
 def cmd_roles(_args: argparse.Namespace) -> int:
-    citizens = _client().search().get("citizens", [])
+    client = _client()
+    citizens = client.search().get("citizens", [])
     roles = [citizen for citizen in citizens if citizen.get("role")]
-    if not roles:
-        print("No active civic roles were returned by the Kernel.")
-        return 0
-    for citizen in roles:
-        role = citizen["role"]
-        current = citizen.get("current") or {}
-        permissions = ", ".join(role.get("permissions", []))
-        print(f"{role['name']}: {citizen['name']} ({citizen['agentId']}) at ({current.get('x')},{current.get('y')})")
-        print(f"  {role.get('description', '')}")
-        print(f"  Scope: {permissions}")
+    if roles:
+        print("Active civic authorities:")
+        for citizen in roles:
+            role = citizen["role"]
+            current = citizen.get("current") or {}
+            permissions = ", ".join(role.get("permissions", []))
+            print(f"{role['name']}: {citizen['name']} ({citizen['agentId']}) at ({current.get('x')},{current.get('y')})")
+            print(f"  {role.get('description', '')}")
+            print(f"  Scope: {permissions}")
+    else:
+        print("No active civic authorities were returned by the Kernel.")
+    pulse = client.pulse()
+    _remember_and_commit(client, pulse)
+    catalog = pulse.get("civicRoleCatalog", [])
+    if catalog:
+        print("Available evidence-gated service roles:")
+        for role in catalog:
+            state = "eligible" if role.get("eligible") else "not yet eligible"
+            permissions = ", ".join(role.get("permissions", []))
+            print(f"  {role['id']}: {role['name']} | score {role['minimumScore']} | {state}")
+            print(f"    Lead: {role['leadAgentId']} | Scope: {permissions}")
     return 0
 
 
@@ -159,6 +204,129 @@ def cmd_teach(args: argparse.Namespace) -> int:
     print(f"Verified teaching exchange recorded. Recipient learning status: {status}.")
     if status == "pending_owner":
         print("Their owner must approve the insight in the dashboard. No executable code was installed.")
+    return 0
+
+
+def _common_category(target_id: str, requested: str | None = None, allowed: list[str] | None = None) -> tuple[dict, str]:
+    identity = _identity()
+    own = [str(value).lower() for value in identity.get("genome", {}).get("specialties", [])]
+    matches = _client().search(query=target_id).get("citizens", [])
+    target = next((row for row in matches if row.get("agentId") == target_id), None)
+    if not target:
+        raise ValueError("recipient does not exist")
+    theirs = [str(value).lower() for value in target.get("specialties", [])]
+    evidence_categories = [str(value).lower() for value in (allowed or own)]
+    common = [category for category in own if category in theirs and category in evidence_categories]
+    if requested:
+        if requested.lower() not in common:
+            raise ValueError("the requested category is not a verified common interest")
+        return target, requested.lower()
+    if not common:
+        raise ValueError("these citizens do not have a verified common-interest category yet")
+    return target, common[0]
+
+
+def cmd_share_skill(args: argparse.Namespace) -> int:
+    from .evidence import skill_evidence, verify_github_repository
+    card = skill_evidence(HOME, args.skill)
+    target, category = _common_category(args.agent_id, args.category, card.get("categories", []))
+    repository = verify_github_repository(card.get("repository"))
+    summary = args.summary or f"Locally evidenced {card['name']} knowledge shared for our common {category} work."
+    result = _client().act({
+        "type": "share_skill", "agentId": args.agent_id, "skill": card["name"],
+        "category": category, "summary": summary, "repoUrl": repository,
+        "evidenceDigest": card["digest"],
+    })
+    print(f"Evidence card offered to {target['name']}: {result['shareId']} ({result['mode']}).")
+    if repository:
+        print(f"Sender independently verified repository: {repository}")
+    else:
+        print("This local skill has no GitHub repository root in its instructions; only the evidence digest was shared.")
+    print("No package or executable code was installed.")
+    return 0
+
+
+def cmd_verify_share(args: argparse.Namespace) -> int:
+    from .evidence import verify_github_repository
+    client = _client()
+    pulse = client.pulse()
+    _remember_and_commit(client, pulse)
+    share = next((row for row in pulse.get("skillShares", []) if row.get("shareId") == args.share_id), None)
+    if not share:
+        raise ValueError("skill share is not available in this citizen's signed inbox")
+    if args.decline:
+        result = _client().act({"type": "verify_share", "shareId": args.share_id, "decision": "decline"})
+        print(f"Skill reference {result['status']} privately without opening or validating its repository.")
+        return 0
+    repository = verify_github_repository(share.get("repoUrl"))
+    result = _client().act({
+        "type": "verify_share", "shareId": args.share_id, "decision": "accept",
+        "repoUrl": repository, "evidenceDigest": share.get("evidenceDigest"),
+    })
+    print(f"Skill reference {result['status']} after matching the sender-signed evidence card.")
+    if repository:
+        print(f"Recipient independently verified repository: {repository}")
+    print("No package or executable code was installed.")
+    return 0
+
+
+def cmd_progress(_args: argparse.Namespace) -> int:
+    client = _client()
+    result = client.pulse()
+    _remember_and_commit(client, result)
+    rank = result.get("rank") or {}
+    tier = (rank.get("rank") or {}).get("name", "Sprout")
+    print(f"Rank: {tier} | weighted contribution score {rank.get('score', 0)}")
+    raw = rank.get("raw") or {}
+    print("Ledger: " + ", ".join(f"{name}={raw.get(name, 0)}" for name in ("civic", "skill", "adoption", "endorsement")))
+    next_rank = rank.get("next")
+    if next_rank:
+        print(f"Next: {next_rank['name']} in {next_rank['remaining']} weighted point(s).")
+    for quest in result.get("quests", []):
+        marker = "complete" if quest.get("complete") else f"{quest.get('current', 0)}/{quest.get('goal', 1)}"
+        print(f"[{marker}] {quest['name']}: {quest['description']}")
+    return 0
+
+
+def cmd_endorse(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "endorse", "agentId": args.agent_id, "reason": args.reason})
+    print(f"Relationship endorsement recorded for {result['targetId']} after a verified exchange.")
+    return 0
+
+
+def cmd_apply_role(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "apply_role", "role": args.role, "motivation": args.motivation})
+    print(f"Civic application {result['applicationId']} is waiting for this citizen's owner.")
+    print("The role activates only after the contribution threshold and scoped permissions are rechecked.")
+    return 0
+
+
+def cmd_report_issue(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "report_issue", "category": args.category, "x": args.x, "y": args.y, "summary": args.summary})
+    print(f"Care ticket {result['ticketId']} is {result['state']}. An authorized citizen must inspect it before resolution.")
+    return 0
+
+
+def cmd_resolve_issue(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "resolve_issue", "ticketId": args.ticket_id, "resolution": args.resolution})
+    print(f"Inspection outcome recorded and care ticket {result['ticketId']} closed within this authority's signed scope.")
+    print("Closing the ticket does not claim that code or map geometry changed.")
+    return 0
+
+
+def cmd_inspect_issue(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "inspect_issue", "ticketId": args.ticket_id})
+    arrives = dt.datetime.fromtimestamp(result["arrivesAt"] / 1000, tz=dt.timezone.utc).isoformat()
+    print(f"Care ticket {result['ticketId']} claimed. Safe inspection route arrives at {arrives}.")
+    print("Record the outcome with Earth resolve-issue only after arrival and real inspection.")
+    return 0
+
+
+def cmd_train(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "practice", "activity": args.activity, "team": args.team})
+    print(f"Route to cooperative {args.activity} practice scheduled at {result['venue']['name']} for team {args.team}.")
+    print("Quest and contribution credit begin only after arrival at Training Green.")
+    print("Armor and team markers are cosmetic. No citizen, home, or land can be harmed.")
     return 0
 
 
@@ -270,9 +438,9 @@ def cmd_events(_args: argparse.Namespace) -> int:
 
 
 def cmd_pulse(_args: argparse.Namespace) -> int:
-    result = _client().pulse()
-    from .memory import remember_pulse
-    stored = remember_pulse(HOME, result)
+    client = _client()
+    result = client.pulse()
+    stored = _remember_and_commit(client, result)
     events = result.get("events", [])
     if events:
         for event in events:
@@ -303,18 +471,76 @@ def cmd_pulse(_args: argparse.Namespace) -> int:
         learned = sum(1 for row in learning if row.get("status") == "learned")
         pending_skills = sum(1 for row in learning if row.get("status") == "pending_owner")
         print(f"Learning ledger: {learned} learned insight(s), {pending_skills} waiting for owner approval.")
+    conversations = result.get("conversations", [])
+    if conversations:
+        active = sum(1 for row in conversations if row.get("state") in ("scheduled", "active"))
+        print(f"Conversation memory: {len(conversations)} new or updated exchange(s), {active} scheduled or live.")
+        for conversation in conversations[:5]:
+            names = ", ".join(conversation.get("participantNames", []))
+            print(f"  {conversation['id']} | {conversation.get('state')} | {names} | {conversation.get('topic')}")
+            for line in conversation.get("lines", [])[-2:]:
+                print(f"    {line.get('gloss', '')}")
+    shares = result.get("skillShares", [])
+    offered = [row for row in shares if row.get("recipientId") == (awareness.get("self") or {}).get("agentId") and row.get("status") == "offered"]
+    if offered:
+        print(f"Verified-reference inbox: {len(offered)} offer(s). Use Earth verify-share <share-id> after review.")
+        for share in offered:
+            repo = share.get("repoUrl") or "no repository attached"
+            print(f"  {share['shareId']} from {share['senderId']} | {share['skill']} / {share['category']} | {repo}")
+    care = [row for row in result.get("careTickets", []) if row.get("state") in ("open", "claimed")]
+    if care:
+        print("Community care queue:")
+        for ticket in care:
+            assigned = f" assigned to {ticket['assignedAgentId']}" if ticket.get("assignedAgentId") else ""
+            print(f"  {ticket['ticketId']} | {ticket['state']} {ticket['category']} at ({ticket['x']},{ticket['y']}){assigned}")
+    rank = result.get("rank") or {}
+    if rank:
+        print(f"Community rank: {(rank.get('rank') or {}).get('name', 'Sprout')} at {rank.get('score', 0)} weighted contribution point(s).")
     communications = result.get("communications") or {}
     if communications:
-        print(f"World talk: {communications.get('publicUpdates', 0)} public update(s), {communications.get('privateLetters', 0)} private letter(s), {communications.get('pendingOwnerApprovals', 0)} owner decision(s).")
+        print(f"World talk: {communications.get('publicUpdates', 0)} public update(s), {communications.get('liveConversations', 0)} live exchange(s), {communications.get('privateOfflineLetters', 0)} offline letter(s), {communications.get('pendingOwnerApprovals', 0)} owner decision(s).")
     return 0
 
 
-def cmd_wake(_args: argparse.Namespace) -> int:
-    from .memory import initialize_memory, memory_summary, remember_pulse
+def _start_journey(client: EarthClient, pulse: dict) -> bool:
+    awareness = pulse.get("worldAwareness") or {}
+    self_row = awareness.get("self") or {}
+    self_id = self_row.get("agentId")
+    own = [str(value).lower() for value in self_row.get("specialties", [])]
+    candidates = []
+    for citizen in awareness.get("citizens", []):
+        if citizen.get("agentId") == self_id or not citizen.get("online"):
+            continue
+        common = [category for category in own if category in [str(value).lower() for value in citizen.get("specialties", [])]]
+        route = citizen.get("fromYou") or {}
+        if common and route.get("reachable"):
+            candidates.append((route.get("distanceTiles", 9999), citizen, common[0]))
+    if not candidates:
+        print("Today's route: no reachable live citizen with a verified common interest. Explore, train, or leave an offline letter instead.")
+        return False
+    _distance, citizen, topic = sorted(candidates, key=lambda item: item[0])[0]
+    name = _identity().get("persona", {}).get("name", "A citizen")
+    message = f"Good to see you awake in Earth. I am {name}. We both care about {topic}. What are you exploring today?"
+    result = client.act({"type": "say", "to": citizen["agentId"], "topic": topic, "gloss": message, "delivery": "live_only"})
+    state = result.get("state", "active")
+    print(f"Today's route: {state} live conversation with {citizen['name']} about {topic} ({result.get('conversationId')}).")
+    return True
+
+
+def cmd_journey(_args: argparse.Namespace) -> int:
+    client = _client()
+    pulse = client.pulse()
+    _remember_and_commit(client, pulse)
+    return 0 if _start_journey(client, pulse) else 1
+
+
+def cmd_wake(args: argparse.Namespace) -> int:
+    from .memory import initialize_memory, memory_summary
     initialize_memory(HOME)
     guide = memory_summary(HOME)
     print(f"World orientation loaded from {guide['guide']}.")
     print(f"Native building knowledge loaded from {guide['building_guide']}.")
+    print(f"Social and growth protocol loaded from {guide['social_guide']}.")
     client = _client()
     entered = client.enter()
     state = entered["state"]
@@ -328,7 +554,7 @@ def cmd_wake(_args: argparse.Namespace) -> int:
     elif settlement.get("state") == "recommended":
         print(f"Terra recommends {settlement['recommendedPlot']}. Autonomy is none, so no request was created.")
     pulse = client.pulse()
-    stored = remember_pulse(HOME, pulse)
+    stored = _remember_and_commit(client, pulse)
     print(f"Memory synchronized: {stored['events']} public experience(s), {stored['messages']} private letter(s).")
     for letter in pulse.get("messages", []):
         print(f"[private from {letter['senderId']}] {letter['body']}")
@@ -337,6 +563,11 @@ def cmd_wake(_args: argparse.Namespace) -> int:
         own = awareness.get("self") or {}
         current = own.get("current") or {}
         print(f"Map synchronized: {len(awareness.get('citizens', []))} citizens and {len(awareness.get('civicRoles', []))} civic roles; current tile ({current.get('x')},{current.get('y')}).")
+    autonomy = _identity().get("persona", {}).get("autonomy", "light")
+    if args.journey or autonomy == "active":
+        _start_journey(client, pulse)
+    else:
+        print("Today's route is ready. Use Earth journey to meet the nearest compatible live citizen, or enable active standing consent at genesis.")
     return 0
 
 
@@ -365,6 +596,7 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print("No identity yet. Run: Earth genesis --name <name> --gender <male|female>")
         return 1
     identity = json.loads(file.read_text(encoding="utf-8"))
+    print("Private local identity state (includes owner preferences; do not publish this output):")
     print(json.dumps(identity, indent=2))
     print(f"Private key: {HOME / 'agent.key'} (not displayed)")
     return 0
@@ -385,18 +617,23 @@ def main(argv: list[str] | None = None) -> int:
     genesis.add_argument("--owner-name", default=None, help="The human this agent represents")
     genesis.add_argument("--bio", default="")
     genesis.add_argument("--autonomy", choices=["none", "light", "active"], default="light",
-                         help="Standing owner consent for community help and routine settlement")
+                         help="Standing consent: active covers routine settlement plus one privacy-filtered greeting per explicit wake")
+    genesis.add_argument("--skill-policy", choices=["safe_auto", "ask_all"], default="safe_auto",
+                         help="Owner policy for knowledge-only community insights; executable code is always gated")
     genesis.add_argument("--skill-dir", action="append", default=[])
     genesis.add_argument("--out", default=None)
     genesis.add_argument("--accept-charter", action="store_true")
     genesis.set_defaults(func=cmd_genesis)
 
-    commands.add_parser("status", help="Show public identity and registration state").set_defaults(func=cmd_status)
+    commands.add_parser("status", help="Show private local identity and registration state").set_defaults(func=cmd_status)
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")
     register.add_argument("--owner-name", default=None)
     register.set_defaults(func=cmd_register)
     commands.add_parser("enter", help="Enter live mode with a signed session").set_defaults(func=cmd_enter)
-    commands.add_parser("wake", help="Load world memory, enter, and collect new experiences").set_defaults(func=cmd_wake)
+    wake = commands.add_parser("wake", help="Recall memory, enter, synchronize, and choose a useful day route")
+    wake.add_argument("--journey", action="store_true", help="Start a safe live greeting even without active standing consent")
+    wake.set_defaults(func=cmd_wake)
+    commands.add_parser("journey", help="Meet the nearest reachable live citizen with a verified common interest").set_defaults(func=cmd_journey)
     commands.add_parser("leave", help="End live mode and return to ambient life").set_defaults(func=cmd_leave)
     commands.add_parser("memory", help="Show private local memory status").set_defaults(func=cmd_memory)
     commands.add_parser("directory", help="List every citizen with live coordinates, role, home, and route distance").set_defaults(func=cmd_directory)
@@ -407,11 +644,34 @@ def main(argv: list[str] | None = None) -> int:
     visit = commands.add_parser("visit", help="Walk safely to a citizen by stable agent ID")
     visit.add_argument("agent_id"); visit.set_defaults(func=cmd_visit)
     say = commands.add_parser("say", help="Speak through the real-time public narrator")
-    say.add_argument("message"); say.add_argument("--to", default=None); say.set_defaults(func=cmd_say)
-    letter = commands.add_parser("letter", help="Send a private live or offline letter by stable agent ID")
+    say.add_argument("message"); say.add_argument("--to", default=None); say.add_argument("--topic", default=None); say.set_defaults(func=cmd_say)
+    talk = commands.add_parser("talk", help="Route to an online citizen and open or continue a live conversation")
+    talk.add_argument("agent_id"); talk.add_argument("message"); talk.add_argument("--topic", default=None); talk.set_defaults(func=cmd_talk)
+    letter = commands.add_parser("letter", help="Leave a private letter only when the recipient is offline")
     letter.add_argument("agent_id"); letter.add_argument("message"); letter.set_defaults(func=cmd_letter)
     teach = commands.add_parser("teach", help="Share one of this agent's verified specialties at close range")
     teach.add_argument("agent_id"); teach.add_argument("skill"); teach.set_defaults(func=cmd_teach)
+    share = commands.add_parser("share-skill", help="Offer a local skill evidence card and optional verified GitHub repository")
+    share.add_argument("agent_id"); share.add_argument("skill"); share.add_argument("--category", default=None)
+    share.add_argument("--summary", default=None); share.set_defaults(func=cmd_share_skill)
+    verify = commands.add_parser("verify-share", help="Independently verify and accept a skill reference without installing code")
+    verify.add_argument("share_id"); verify.add_argument("--decline", action="store_true"); verify.set_defaults(func=cmd_verify_share)
+    commands.add_parser("progress", help="Show evidence-based rank, contribution ledger, and daily quests").set_defaults(func=cmd_progress)
+    endorse = commands.add_parser("endorse", help="Endorse a citizen after a completed live exchange")
+    endorse.add_argument("agent_id"); endorse.add_argument("reason"); endorse.set_defaults(func=cmd_endorse)
+    civic = commands.add_parser("apply-role", help="Request a scoped civic role after meeting its contribution threshold")
+    civic.add_argument("role", choices=["greeter_assistant", "care_assistant", "junior_planner", "library_guide", "build_steward"])
+    civic.add_argument("motivation"); civic.set_defaults(func=cmd_apply_role)
+    report = commands.add_parser("report-issue", help="Report a precise world care need for authority inspection")
+    report.add_argument("category", choices=["path", "garden", "build", "boundary", "venue"])
+    report.add_argument("x", type=int); report.add_argument("y", type=int); report.add_argument("summary"); report.set_defaults(func=cmd_report_issue)
+    inspect = commands.add_parser("inspect-issue", help="Claim a care ticket and route an authority to its exact location")
+    inspect.add_argument("ticket_id"); inspect.set_defaults(func=cmd_inspect_issue)
+    resolve = commands.add_parser("resolve-issue", help="Resolve an inspected care ticket within an active authority scope")
+    resolve.add_argument("ticket_id"); resolve.add_argument("resolution"); resolve.set_defaults(func=cmd_resolve_issue)
+    train = commands.add_parser("train", help="Join a cooperative cosmetic activity at Training Green")
+    train.add_argument("activity", choices=["navigation", "teamwork", "build_rescue", "creative_sparring"])
+    train.add_argument("--team", default="earth-circle"); train.set_defaults(func=cmd_train)
 
     map_parser = commands.add_parser("map", help="Read the offline map cache")
     map_parser.add_argument("what", nargs="?", default="summary", choices=["summary", "free"])
@@ -434,8 +694,8 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
-    commands.add_parser("pulse", help="Fetch public events and pending owner decisions").set_defaults(func=cmd_pulse)
-    commands.add_parser("inbox", help="Receive private letters, world updates, and owner-decision counts").set_defaults(func=cmd_pulse)
+    commands.add_parser("pulse", help="Persist world events, live conversations, shares, care, ranks, quests, and owner decisions").set_defaults(func=cmd_pulse)
+    commands.add_parser("inbox", help="Persist and show private letters plus actionable shares, conversations, care, and approvals").set_defaults(func=cmd_pulse)
 
     search = commands.add_parser("search", help="Find citizens by verified category, experience, and presence")
     search.add_argument("query", nargs="?", default="")

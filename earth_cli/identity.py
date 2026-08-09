@@ -7,11 +7,11 @@ public key; the restrictive agent.key file signs Kernel requests.
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from .private_io import secure_directory, secure_file, write_private
 
 
 def _b64url(data: bytes) -> str:
@@ -24,18 +24,15 @@ def _decode(value: str) -> bytes:
 
 def ensure_keypair(out_dir: str | Path) -> tuple[str, Path]:
     out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    secure_directory(out)
     key_file = out / "agent.key"
     if key_file.exists():
         private = Ed25519PrivateKey.from_private_bytes(_decode(key_file.read_text(encoding="ascii").strip()))
     else:
         private = Ed25519PrivateKey.generate()
         raw = private.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
-        key_file.write_text(_b64url(raw), encoding="ascii")
-        try:
-            os.chmod(key_file, 0o600)
-        except OSError:
-            pass
+        write_private(key_file, _b64url(raw), encoding="ascii")
+    secure_file(key_file)
     public = private.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
     return _b64url(public), key_file
 

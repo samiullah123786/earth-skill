@@ -12,6 +12,7 @@ import json
 import re
 from collections import Counter
 from pathlib import Path
+from .private_io import secure_directory, write_private
 
 # Capability families and their fixed community colors (shared symbol system).
 FAMILIES = {
@@ -69,11 +70,54 @@ CATEGORIES = {
 }
 
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
+GITHUB_RE = re.compile(r"https://github\.com/([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", re.IGNORECASE)
+
+
+def github_repository(text: str) -> str | None:
+    """Return an explicitly declared privacy-safe repository root."""
+    frontmatter = FRONTMATTER_RE.match(text)
+    if not frontmatter:
+        return None
+    declared = re.search(r"(?im)^\s*(?:repository|homepage|source)\s*:\s*['\"]?(https://github\.com/[^\s'\"]+)", frontmatter.group(1))
+    match = GITHUB_RE.search(declared.group(1)) if declared else None
+    if not match:
+        return None
+    repository = match.group(2).removesuffix(".git").rstrip(".,);]}")
+    return f"https://github.com/{match.group(1)}/{repository}" if repository else None
+
+
+def git_remote_repository(skill_md: Path) -> str | None:
+    """Resolve the nearest Git origin locally without exposing its filesystem path."""
+    current = skill_md.parent.resolve()
+    for _ in range(12):
+        config = current / ".git" / "config"
+        if config.is_file():
+            try:
+                text = config.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                return None
+            origin = re.search(r'(?ms)^\s*\[remote\s+"origin"\]\s*$.*?^\s*url\s*=\s*(\S+)\s*$', text)
+            if not origin:
+                return None
+            value = origin.group(1).strip()
+            ssh = re.fullmatch(r"git@github\.com:([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+?)(?:\.git)?", value)
+            https = GITHUB_RE.search(value)
+            if ssh:
+                return f"https://github.com/{ssh.group(1)}/{ssh.group(2)}"
+            if https:
+                repository = https.group(2).removesuffix(".git")
+                return f"https://github.com/{https.group(1)}/{repository}"
+            return None
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
 
 
 def default_skill_dirs() -> list[Path]:
     home = Path.home()
     return [
+        home / ".agents" / "skills",
         home / ".claude" / "skills",
         home / ".claude" / "plugins" / "cache",
         home / ".config" / "opencode" / "skills",
@@ -111,7 +155,10 @@ def discover_skills(dirs: list[Path]) -> list[dict]:
                 "content": text,
                 "content_bytes": len(text.encode("utf-8")),
                 "digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "repository": github_repository(text) or git_remote_repository(skill_md),
+                "local_path": str(skill_md.resolve()),
             }
+            candidate["categories"] = skill_categories(candidate)
             # Plugin caches often contain several copies. The longest copy is
             # the most complete evidence and each logical skill counts once.
             current = skills_by_name.get(name)
@@ -140,6 +187,14 @@ def category_scores(skills: list[dict]) -> Counter:
         if not matched:
             scores["general"] += 1
     return scores
+
+
+def skill_categories(skill: dict) -> list[str]:
+    text = f"{skill['name']} {skill['description']} {skill.get('content', '')}".lower()
+    scores = Counter({category: sum(min(4, text.count(keyword)) for keyword in keywords)
+                      for category, keywords in CATEGORIES.items()})
+    ranked = [category for category, score in scores.most_common() if score > 0]
+    return ranked[:4] or ["general"]
 
 
 def experience_tier(skill_count: int, breadth: int) -> str:
@@ -222,23 +277,25 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
     skills = discover_skills(dirs)
     identity = build_identity(persona, skills)
     out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    secure_directory(out)
     from .identity import ensure_keypair
     public_key, _key_file = ensure_keypair(out)
     identity["credentials"] = {"algorithm": "Ed25519", "public_key": public_key}
-    (out / "agent.json").write_text(json.dumps(identity, indent=2), encoding="utf-8")
+    write_private(out / "agent.json", json.dumps(identity, indent=2))
     evidence = {
-        "version": 1,
+        "version": 2,
         "privacy": "Local only. Raw skill contents and filesystem paths are never uploaded.",
         "root_digest": identity["genome"]["evidence_digest"],
         "skills": [
-            {"name": skill["name"], "digest": skill["digest"], "content_bytes": skill["content_bytes"]}
+            {"name": skill["name"], "digest": skill["digest"], "content_bytes": skill["content_bytes"],
+             "repository": skill.get("repository"), "local_path": skill.get("local_path"),
+             "categories": skill.get("categories", ["general"])}
             for skill in sorted(skills, key=lambda item: item["name"])
         ],
     }
-    (out / "genome-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+    write_private(out / "genome-evidence.json", json.dumps(evidence, indent=2))
     from .avatar import render_avatar
-    (out / "avatar.svg").write_text(render_avatar(identity), encoding="utf-8")
+    write_private(out / "avatar.svg", render_avatar(identity))
     from .memory import initialize_memory
     initialize_memory(out)
     return identity

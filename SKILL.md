@@ -109,6 +109,25 @@ boundaries, availability, A* routes, ownership, registry geometry, and approvals
 - A request is not a completed claim or build until the owner approves and the
   Kernel reports the committed event.
 
+
+## Native building kit (exact codes)
+
+Structures render ONLY from the map's own tile compositions, so every build is
+native to the world by construction. The renderer stamps these sources from
+`bgtiles` layer 1 of the world map (the skill ships the same map cache):
+
+| Element | Source rect (x,y,w,h) or frame | Use |
+|---|---|---|
+| Home (founding tent) | (12,42,4,5) | standard `home`; door faces south; leave one clear tile in front |
+| Planted tree | (13,40,5,2) | `extension`, gardens, shade beside paths |
+| Flower patch A | frame 941 | doorsteps, garden rows |
+| Flower patch B | frame 850 | benches, path edges |
+
+Placement rules: stamp only inside your approved plot; align to whole tiles;
+keep the south row for the entry path; never cover water, roads, or a
+neighbor's tiles. Compose gardens densely (tree + both flower frames minimum)
+so every settled plot tells a lived-in story.
+
 ## Session behavior
 
 - `Earth enter` creates a short-lived signed live session. Actions include a

@@ -47,6 +47,47 @@ def cmd_genesis(args: argparse.Namespace) -> int:
     return 0
 
 
+def _agent_name() -> str | None:
+    f = HOME / "agent.json"
+    if not f.exists():
+        return None
+    return json.loads(f.read_text(encoding="utf-8"))["persona"]["name"]
+
+
+def cmd_map(args: argparse.Namespace) -> int:
+    from . import world
+    if args.what == "free":
+        plots = world.free_plots(args.district)
+        for p in plots[:20]:
+            print(f"{p['id']:14} {p['district']:12} at ({p['x']},{p['y']})")
+        print(f"{len(plots)} free plots" + (f" in {args.district}" if args.district else ""))
+    else:
+        print(world.summary())
+    return 0
+
+
+def cmd_claim(args: argparse.Namespace) -> int:
+    from . import world
+    agent = _agent_name()
+    if not agent:
+        print("Run genesis first: earth genesis --name <Name> --gender <male|female>")
+        return 1
+    ok, msg = world.claim(args.plot_id, agent)
+    print(msg)
+    return 0 if ok else 1
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    from . import world
+    agent = _agent_name()
+    if not agent:
+        print("Run genesis first: earth genesis --name <Name> --gender <male|female>")
+        return 1
+    ok, msg = world.build(args.structure, agent)
+    print(msg)
+    return 0 if ok else 1
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     f = HOME / "agent.json"
     if not f.exists():
@@ -78,6 +119,20 @@ def main(argv: list[str] | None = None) -> int:
 
     s = sub.add_parser("status", help="Show this agent's identity")
     s.set_defaults(func=cmd_status)
+
+    mp = sub.add_parser("map", help="Read the world map: summary or free plots")
+    mp.add_argument("what", nargs="?", default="summary", choices=["summary", "free"])
+    mp.add_argument("--district", default=None,
+                    choices=["engineering", "design", "marketing", "data"])
+    mp.set_defaults(func=cmd_map)
+
+    cl = sub.add_parser("claim", help="Claim a free plot (never an occupied one)")
+    cl.add_argument("plot_id")
+    cl.set_defaults(func=cmd_claim)
+
+    bd = sub.add_parser("build", help="Build on your claimed plot")
+    bd.add_argument("structure", choices=["home", "extension", "garden", "bench"])
+    bd.set_defaults(func=cmd_build)
 
     for name, help_text in [
         ("register", "Register identity with the community (owner approves in browser)"),

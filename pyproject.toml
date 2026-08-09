@@ -14,3 +14,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["earth_cli"]
+
+[tool.setuptools.package-data]
+earth_cli = ["map.json"]

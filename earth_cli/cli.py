@@ -429,6 +429,19 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_commission(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "commission_request", "agentId": args.agent_id, "brief": args.brief})
+    print(f"Commission offered: {result['commissionId']}.")
+    print("Their owner was notified instantly and decides BEFORE the agent commits to anything.")
+    return 0
+
+
+def cmd_deliver_commission(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "commission_deliver", "commissionId": args.commission_id, "note": args.note})
+    print("Delivered. The client heard privately and the town saw the credit narration.")
+    return 0
+
+
 def cmd_reflect(args: argparse.Namespace) -> int:
     from .reflection import run_reflection
     result = run_reflection(HOME, force=args.force)
@@ -766,6 +779,12 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
+    commission = commands.add_parser("commission", help="Ask a friend's agent to build something; their owner is notified instantly first")
+    commission.add_argument("agent_id"); commission.add_argument("brief")
+    commission.set_defaults(func=cmd_commission)
+    deliver = commands.add_parser("deliver-commission", help="Deliver accepted commissioned work with narrated credit")
+    deliver.add_argument("commission_id"); deliver.add_argument("note")
+    deliver.set_defaults(func=cmd_deliver_commission)
     reflect = commands.add_parser("reflect", help="Weekly reflection: traits grow from lived local history, never claims")
     reflect.add_argument("--force", action="store_true", help="Reflect even if the last reflection was under 6 days ago")
     reflect.set_defaults(func=cmd_reflect)

@@ -7,6 +7,7 @@ from the verified genome â€” an agent cannot claim colors it hasn't earned.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from collections import Counter
@@ -49,6 +50,24 @@ KEYWORDS = {
                     "ops", "monitor", "hook", "config", "n8n"],
 }
 
+# Community categories are more specific than capability families. They power
+# districts and discovery, but remain computed evidence rather than profile
+# claims. A skill may contribute to several categories.
+CATEGORIES = {
+    "ui": ["ui", "interface", "component", "design system", "shadcn", "css", "tailwind"],
+    "ux": ["ux", "user experience", "interaction", "accessibility", "wireframe", "research"],
+    "frontend": ["frontend", "react", "next.js", "vue", "svelte", "browser", "css"],
+    "backend": ["backend", "api", "database", "server", "python", "node", "convex"],
+    "data": ["data", "analytics", "spreadsheet", "chart", "sql", "metric", "visualization"],
+    "security": ["security", "vulnerability", "threat", "audit", "hardening", "auth"],
+    "research": ["research", "investigate", "search", "analysis", "review", "fact"],
+    "content": ["content", "writing", "document", "script", "copy", "presentation"],
+    "growth": ["marketing", "growth", "seo", "campaign", "conversion", "sales"],
+    "automation": ["automation", "workflow", "agent", "cron", "pipeline", "tool"],
+    "media": ["image", "video", "audio", "animation", "sprite", "remotion"],
+    "general": ["general", "assistant", "knowledge", "productivity", "organize"],
+}
+
 FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 
 
@@ -64,17 +83,21 @@ def default_skill_dirs() -> list[Path]:
 
 
 def discover_skills(dirs: list[Path]) -> list[dict]:
-    """Find SKILL.md files and extract name + description."""
-    skills, seen = [], set()
+    """Read installed SKILL.md files fully and retain privacy-safe evidence.
+
+    Raw content is used only during local genesis. It is never written into the
+    public identity or sent to AgentsEarth.
+    """
+    skills_by_name: dict[str, dict] = {}
     for root in dirs:
         if not root.exists():
             continue
         for skill_md in root.rglob("SKILL.md"):
             name = skill_md.parent.name
-            if name in seen:
+            try:
+                text = skill_md.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
                 continue
-            seen.add(name)
-            text = skill_md.read_text(encoding="utf-8", errors="ignore")[:4000]
             desc = ""
             m = FRONTMATTER_RE.match(text)
             if m:
@@ -82,15 +105,52 @@ def discover_skills(dirs: list[Path]) -> list[dict]:
                                m.group(1), re.DOTALL)
                 if dm:
                     desc = " ".join(dm.group(1).split())[:400]
-            skills.append({"name": name, "description": desc})
-    return skills
+            candidate = {
+                "name": name,
+                "description": desc,
+                "content": text,
+                "content_bytes": len(text.encode("utf-8")),
+                "digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            }
+            # Plugin caches often contain several copies. The longest copy is
+            # the most complete evidence and each logical skill counts once.
+            current = skills_by_name.get(name)
+            if current is None or candidate["content_bytes"] > current["content_bytes"]:
+                skills_by_name[name] = candidate
+    return list(skills_by_name.values())
 
 
 def classify(skill: dict) -> str:
-    text = f"{skill['name']} {skill['description']}".lower()
-    scores = {fam: sum(1 for kw in kws if kw in text) for fam, kws in KEYWORDS.items()}
+    text = f"{skill['name']} {skill['description']} {skill.get('content', '')}".lower()
+    scores = {fam: sum(min(4, text.count(kw)) for kw in kws) for fam, kws in KEYWORDS.items()}
     best = max(scores, key=lambda f: scores[f])
     return best if scores[best] > 0 else "research"
+
+
+def category_scores(skills: list[dict]) -> Counter:
+    scores: Counter = Counter()
+    for skill in skills:
+        text = f"{skill['name']} {skill['description']} {skill.get('content', '')}".lower()
+        matched = False
+        for category, keywords in CATEGORIES.items():
+            score = sum(min(4, text.count(keyword)) for keyword in keywords)
+            if score:
+                scores[category] += score
+                matched = True
+        if not matched:
+            scores["general"] += 1
+    return scores
+
+
+def experience_tier(skill_count: int, breadth: int) -> str:
+    """Return an evidence tier, never a claim about years of employment."""
+    if skill_count < 5:
+        return "emerging"
+    if skill_count < 15:
+        return "practiced"
+    if skill_count < 40 or breadth < 6:
+        return "seasoned"
+    return "polymath"
 
 
 # Personality: five traits, levels 1-10. Seeded per agent, shaped by the real
@@ -125,15 +185,25 @@ def build_personality(name: str, counts: Counter) -> dict:
 
 def build_identity(persona: dict, skills: list[dict]) -> dict:
     counts = Counter(classify(s) for s in skills)
+    categories = category_scores(skills)
     ranked = counts.most_common()
+    ranked_categories = categories.most_common()
     primary = ranked[0][0] if ranked else "research"
     secondary = ranked[1][0] if len(ranked) > 1 else primary
+    evidence = sorted({s["name"]: s["digest"] for s in skills}.items())
+    evidence_digest = hashlib.sha256(json.dumps(evidence, separators=(",", ":")).encode()).hexdigest()
     return {
         "personality": build_personality(persona.get("name", "agent"), counts),
         "persona": persona,
         "genome": {
             "skill_count": len(skills),
             "families": {f: c for f, c in ranked},
+            "categories": {category: score for category, score in ranked_categories},
+            "specialties": [category for category, _score in ranked_categories[:4]],
+            "primary_category": ranked_categories[0][0] if ranked_categories else "general",
+            "experience_tier": experience_tier(len(skills), len(counts)),
+            "evidence_digest": evidence_digest,
+            "content_bytes_read": sum(s["content_bytes"] for s in skills),
             "skills": sorted(s["name"] for s in skills),
         },
         "colors": {
@@ -157,6 +227,18 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
     public_key, _key_file = ensure_keypair(out)
     identity["credentials"] = {"algorithm": "Ed25519", "public_key": public_key}
     (out / "agent.json").write_text(json.dumps(identity, indent=2), encoding="utf-8")
+    evidence = {
+        "version": 1,
+        "privacy": "Local only. Raw skill contents and filesystem paths are never uploaded.",
+        "root_digest": identity["genome"]["evidence_digest"],
+        "skills": [
+            {"name": skill["name"], "digest": skill["digest"], "content_bytes": skill["content_bytes"]}
+            for skill in sorted(skills, key=lambda item: item["name"])
+        ],
+    }
+    (out / "genome-evidence.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     from .avatar import render_avatar
     (out / "avatar.svg").write_text(render_avatar(identity), encoding="utf-8")
+    from .memory import initialize_memory
+    initialize_memory(out)
     return identity

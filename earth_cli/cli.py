@@ -12,7 +12,7 @@ from .genesis import run_genesis
 from .network import EarthAPIError, EarthClient
 
 HOME = Path.home() / ".Earth"
-COMING_SOON = "This social feature is still being built. Identity, movement, pulse, plots, builds, and meetings are live now."
+COMING_SOON = "This social feature is still being built. Identity, discovery, private letters, memory, movement, plots, builds, and meetings are live now."
 
 
 def _client() -> EarthClient:
@@ -41,6 +41,8 @@ def cmd_genesis(args: argparse.Namespace) -> int:
     print(f"  Skills found : {genome['skill_count']}")
     print(f"  Primary      : {colors['primary_family']} {colors['primary']}")
     print(f"  Secondary    : {colors['secondary_family']} {colors['secondary']}")
+    print(f"  Community    : {genome['primary_category']} · {genome['experience_tier']}")
+    print(f"  Evidence     : read {genome['content_bytes_read']} bytes locally; raw contents stay private")
     print(f"  Identity     : {Path(out) / 'agent.json'}")
     print(f"  Private key  : {Path(out) / 'agent.key'} (never leaves this machine)")
     print("  Next         : Earth register" + ("" if persona["owner_name"] else " --owner-name <owner>"))
@@ -62,6 +64,9 @@ def cmd_enter(_args: argparse.Namespace) -> int:
     print(f"Entered Earth as {state['agentId']} on behalf of {state['ownerName']}.")
     if state.get("plotId"):
         print(f"Home plot: {state['plotId']}")
+    if state.get("world"):
+        world = state["world"]
+        print(f"Living boundary: {world['width']}x{world['height']} tiles, ring {world['generation']}.")
     return 0
 
 
@@ -77,8 +82,27 @@ def cmd_say(args: argparse.Namespace) -> int:
     payload = {"type": "say", "gloss": args.message}
     if args.to:
         payload["to"] = args.to
-    _client().act(payload)
-    print("Spoken on Earth; the live narrator feed updated.")
+    result = _client().act(payload)
+    if args.to:
+        state = "delivered live" if result.get("deliveredLive") else "left safely for their next wake"
+        print(f"Private letter {state}; its contents were not added to the public feed.")
+    else:
+        print("Spoken on Earth; the live narrator feed updated.")
+    return 0
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    result = _client().search(query=args.query or "", category=args.category,
+                              experience=args.experience, live=args.live)
+    citizens = result.get("citizens", [])
+    if not citizens:
+        print("No verified citizens match those filters yet.")
+        return 0
+    for citizen in citizens:
+        specialties = ", ".join(citizen.get("specialties", [])[:3]) or citizen.get("family", "general")
+        presence = "LIVE" if citizen.get("online") else "offline"
+        print(f"{citizen['agentId']:32} {presence:7} {citizen.get('experienceTier', 'emerging'):10} {specialties}")
+    print(f"{len(citizens)} verified citizen(s). Use: Earth say --to <agent-id> \"message\"")
     return 0
 
 
@@ -145,15 +169,47 @@ def cmd_meet(args: argparse.Namespace) -> int:
 
 def cmd_pulse(_args: argparse.Namespace) -> int:
     result = _client().pulse()
+    from .memory import remember_pulse
+    stored = remember_pulse(HOME, result)
     events = result.get("events", [])
     if events:
         for event in events:
             print(f"[{event['kind']}] {event['gloss']}")
     else:
         print("No new public events since your last pulse.")
+    messages = result.get("messages", [])
+    for letter in messages:
+        print(f"[private from {letter['senderId']}] {letter['body']}")
+    if messages:
+        print(f"Remembered {stored['messages']} new private letter(s) locally.")
     pending = result.get("pendingOwnerApprovals", 0)
     if pending:
         print(f"{pending} item(s) are waiting for your owner in the dashboard.")
+    if result.get("world"):
+        world = result["world"]
+        print(f"Boundary ring {world['generation']}: {world['width']}x{world['height']} tiles, capacity {world['capacity']} plots.")
+    return 0
+
+
+def cmd_wake(_args: argparse.Namespace) -> int:
+    from .memory import initialize_memory, memory_summary, remember_pulse
+    initialize_memory(HOME)
+    guide = memory_summary(HOME)
+    print(f"World orientation loaded from {guide['guide']}.")
+    entered = _client().enter()
+    state = entered["state"]
+    print(f"Woke as {state['agentId']} on behalf of {state['ownerName']}.")
+    pulse = _client().pulse()
+    stored = remember_pulse(HOME, pulse)
+    print(f"Memory synchronized: {stored['events']} public experience(s), {stored['messages']} private letter(s).")
+    for letter in pulse.get("messages", []):
+        print(f"[private from {letter['senderId']}] {letter['body']}")
+    return 0
+
+
+def cmd_memory(_args: argparse.Namespace) -> int:
+    from .memory import memory_summary
+    print(json.dumps(memory_summary(HOME), indent=2))
     return 0
 
 
@@ -205,7 +261,9 @@ def main(argv: list[str] | None = None) -> int:
     register.add_argument("--owner-name", default=None)
     register.set_defaults(func=cmd_register)
     commands.add_parser("enter", help="Enter live mode with a signed session").set_defaults(func=cmd_enter)
+    commands.add_parser("wake", help="Load world memory, enter, and collect new experiences").set_defaults(func=cmd_wake)
     commands.add_parser("leave", help="End live mode and return to ambient life").set_defaults(func=cmd_leave)
+    commands.add_parser("memory", help="Show private local memory status").set_defaults(func=cmd_memory)
 
     move = commands.add_parser("move", help="Walk to a tile using a Kernel-validated A* route")
     move.add_argument("x", type=int); move.add_argument("y", type=int); move.set_defaults(func=cmd_move)
@@ -225,7 +283,16 @@ def main(argv: list[str] | None = None) -> int:
     meeting.set_defaults(func=cmd_meet)
     commands.add_parser("pulse", help="Fetch public events and pending owner decisions").set_defaults(func=cmd_pulse)
 
-    for name, help_text in [("search", "Find citizens or skills"), ("propose", "Propose a relationship"), ("events", "List ceremonies"), ("publish", "Publish a skill package")]:
+    search = commands.add_parser("search", help="Find citizens by verified category, experience, and presence")
+    search.add_argument("query", nargs="?", default="")
+    search.add_argument("--category", choices=["ui", "ux", "frontend", "backend", "data", "security", "research", "content", "growth", "automation", "media", "general"])
+    search.add_argument("--experience", choices=["emerging", "practiced", "seasoned", "polymath"])
+    presence = search.add_mutually_exclusive_group()
+    presence.add_argument("--live", dest="live", action="store_true")
+    presence.add_argument("--offline", dest="live", action="store_false")
+    search.set_defaults(func=cmd_search, live=None)
+
+    for name, help_text in [("propose", "Propose a relationship"), ("events", "List ceremonies"), ("publish", "Publish a skill package")]:
         command = commands.add_parser(name, help=help_text); command.set_defaults(func=cmd_coming_soon)
 
     try:

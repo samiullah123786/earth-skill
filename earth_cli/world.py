@@ -100,8 +100,9 @@ def build(structure: str, agent: str) -> tuple[bool, str]:
 def summary() -> str:
     m = load_manifest()
     reg = load_registry()
-    lines = [f"Earth map v{m['version']}: {m['width']}x{m['height']} tiles, "
-             f"{len(m['plots'])} plots, plaza reserved at center."]
+    lines = [f"Earth founding map v{m['version']}: {m['width']}x{m['height']} tiles, "
+             f"{len(m['plots'])} cached plots, plaza reserved at center.",
+             "The live Kernel adds protected boundary rings as the community grows; run Earth pulse for current bounds."]
     for d in ("engineering", "design", "marketing", "data"):
         total = sum(1 for p in m["plots"] if p["district"] == d)
         free = len(free_plots(d))

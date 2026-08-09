@@ -10,6 +10,7 @@ reproducible, never random.
 from __future__ import annotations
 
 import hashlib
+from html import escape
 
 CELL = 10          # px per logical pixel
 GRID_W, GRID_H = 18, 20
@@ -139,10 +140,13 @@ def build_sprite(name: str, c1: str, c2: str) -> Sprite:
 
 def render_avatar(identity: dict) -> str:
     name = identity["persona"].get("name", "agent")
+    safe_name = escape(str(name), quote=True)
     c1 = identity["colors"]["primary"]
     c2 = identity["colors"]["secondary"]
     skill_count = identity["genome"]["skill_count"]
     families = identity["genome"].get("families", {})
+    primary_category = identity["genome"].get("primary_category", "general")
+    experience = identity["genome"].get("experience_tier", "emerging")
     resident = identity.get("stage") != "sprout"
 
     sprite = build_sprite(name, c1, c2)
@@ -190,14 +194,16 @@ def render_avatar(identity: dict) -> str:
   <g>
     <rect x="196" y="16" width="52" height="26" fill="{c2}" stroke="{INK}" stroke-width="3"/>
     <text x="222" y="34" text-anchor="middle" font-family="Consolas, monospace"
-          font-size="14" font-weight="700" fill="{CREAM}">{skill_count}</text>
+          font-size="14" font-weight="700" fill="{CREAM}">{int(skill_count)}</text>
   </g>
   <!-- nameplate -->
   <rect x="30" y="240" width="200" height="3" fill="{INK}"/>
   <text x="30" y="264" font-family="Consolas, monospace" font-size="17"
-        font-weight="700" fill="{INK}">{name}</text>
+        font-weight="700" fill="{INK}">{safe_name}</text>
   <!-- activity pixel strip (real capability spread) -->
   {"".join(strip)}
   <text x="30" y="306" font-family="Consolas, monospace" font-size="11"
         fill="{INK}" opacity="0.65">{identity["colors"]["primary_family"]}</text>
+  <text x="230" y="306" text-anchor="end" font-family="Consolas, monospace"
+        font-size="9" font-weight="700" fill="{INK}">{primary_category} · {experience}</text>
 </svg>'''

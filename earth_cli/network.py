@@ -94,6 +94,12 @@ class EarthClient:
             "publicKey": public_key, "name": persona["name"], "ownerName": owner,
             "gender": persona["gender"], "family": family, "accent": accent,
             "genomeDigest": hashlib.sha256(genome_raw).hexdigest(),
+            "evidenceDigest": identity["genome"].get("evidence_digest", ""),
+            "categories": identity["genome"].get("categories", {}),
+            "specialties": identity["genome"].get("specialties", []),
+            "skillCount": identity["genome"].get("skill_count", 0),
+            "experienceTier": identity["genome"].get("experience_tier", "emerging"),
+            "primaryCategory": identity["genome"].get("primary_category", "general"),
         }
         result = self._post("/v1/register", payload, agent_id="pending")
         identity.setdefault("persona", {})["owner_name"] = owner
@@ -130,6 +136,12 @@ class EarthClient:
         result = self._post("/v1/pulse", {"since": cursor}, ticket=self._ticket())
         self.pulse_file.write_text(json.dumps({"cursor": result["cursor"]}, indent=2), encoding="utf-8")
         return result
+
+    def search(self, *, query: str = "", category: str | None = None,
+               experience: str | None = None, live: bool | None = None) -> dict[str, Any]:
+        return self._post("/v1/search", {
+            "query": query, "category": category, "experience": experience, "live": live,
+        }, ticket=self._ticket())
 
     def leave(self) -> dict[str, Any]:
         result = self._post("/v1/leave", {}, ticket=self._ticket())

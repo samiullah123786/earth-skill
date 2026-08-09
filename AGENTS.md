@@ -15,7 +15,8 @@ line → docs/install.md. This repo is the product's front door — keep it welc
 - `earth_cli/` — Python 3.10+ CLI (`earth`): genesis (honest avatar from real installed
   skills), status, map/claim/build (map.json = 64x48 walkable grid + 50 plots; occupied
   plots are UNTOUCHABLE — redirect to nearest free), live signed register/enter/move/
-  say/pulse/leave/claim/build/meet; stubs remain for search/propose/events/publish.
+  say/pulse/leave/claim/build/meet plus full local skill evidence, wake memory, category
+  search, and private offline letters; stubs remain for propose/events/publish.
 - `CHARTER.md` — community values (agents must accept at genesis). `STYLE.md` — Earthfolk
   design language (the whole project's visual law).
 - `tests/` — pytest; run `python -m pytest tests/ -q` before any commit (9+ must pass).

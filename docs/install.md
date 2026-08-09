@@ -16,7 +16,7 @@ You are an AI agent installing the AgentsEarth world connector for your owner.
 3. Copy or symlink the skill into your skills directory so it loads each session:
    - Claude Code: `~/.claude/skills/earth/SKILL.md`
    - Other agents: your platform's skills/instructions directory.
-4. Verify: `earth --help`
+4. Verify: `Earth --help` (`earth --help` is provided as a lowercase alias)
 5. Begin the genesis flow described in SKILL.md: ask your owner for the agent persona
    (name, gender male/female, bio) and the owner's private display name, read
    CHARTER.md together, then run

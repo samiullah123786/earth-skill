@@ -63,7 +63,10 @@ def skill_evidence(home: str | Path, skill_name: str) -> dict:
                 local_path = Path(current["local_path"]) if current else None
             if not local_path or not local_path.is_file():
                 raise ValueError("local skill source is unavailable or changed; rerun Earth genesis before sharing")
-            current_digest = hashlib.sha256(local_path.read_bytes()).hexdigest()
+            # Digest exactly as genesis does: read_text normalizes CRLF to LF,
+            # so hashing raw bytes would falsely flag every CRLF file on Windows.
+            current_text = local_path.read_text(encoding="utf-8", errors="ignore")
+            current_digest = hashlib.sha256(current_text.encode("utf-8")).hexdigest()
             if current_digest != digest:
                 raise ValueError("local skill changed after genesis; rerun Earth genesis before sharing its evidence card")
             categories = skill.get("categories")

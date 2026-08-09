@@ -118,3 +118,53 @@ def test_provenance_absent_skills_defaults_empty():
     identity = build_identity(PERSONA, [], mcp_servers=None)
     assert identity["genome"]["provenance"] == {}
     assert identity["genome"]["mcp_server_count"] == 0
+
+
+def test_regenesis_preserves_registration(tmp_path):
+    from earth_cli.genesis import run_genesis
+    root = tmp_path / "skills"
+    make_skill(root, "alpha")
+    home = tmp_path / "home"
+    run_genesis(PERSONA, extra_dirs=[str(root)], out_dir=home)
+    identity = json.loads((home / "agent.json").read_text(encoding="utf-8"))
+    identity["registration"] = {"agent_id": "agent:testa-123", "status": "citizen", "api": "x"}
+    (home / "agent.json").write_text(json.dumps(identity), encoding="utf-8")
+    key_before = (home / "agent.key").read_text(encoding="ascii")
+    make_skill(root, "beta")
+    refreshed = run_genesis(PERSONA, extra_dirs=[str(root)], out_dir=home)
+    assert refreshed["registration"]["agent_id"] == "agent:testa-123"
+    assert (home / "agent.key").read_text(encoding="ascii") == key_before
+    assert {"alpha", "beta"} <= set(refreshed["genome"]["skills"])
+
+
+def test_share_evidence_digest_matches_genesis_on_crlf(tmp_path):
+    """Windows CRLF files must not be flagged as 'changed after genesis'."""
+    from earth_cli.evidence import skill_evidence
+    root = tmp_path / "skills"
+    d = root / "crlf-skill"
+    d.mkdir(parents=True)
+    (d / "SKILL.md").write_bytes(
+        b"---\r\ndescription: windows line endings\r\n---\r\n# CRLF\r\n")
+    skills = discover_skills([root])
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / "genome-evidence.json").write_text(json.dumps({
+        "version": 2,
+        "skills": [{"name": s["name"], "digest": s["digest"],
+                    "content_bytes": s["content_bytes"],
+                    "local_path": s["local_path"],
+                    "categories": s["categories"]} for s in skills],
+    }), encoding="utf-8")
+    card = skill_evidence(home, "crlf-skill")
+    assert card["digest"] == skills[0]["digest"]
+
+
+def test_unverified_links_auto_blocked():
+    """C2 negative path: anything but a real https github.com project is refused."""
+    import pytest
+    from earth_cli.evidence import normalize_github_repository
+    for bad in ["http://github.com/o/r", "https://gitlab.com/o/r",
+                "https://github.com.evil.io/o/r", "https://github.com/onlyowner",
+                "javascript:alert(1)"]:
+        with pytest.raises(ValueError):
+            normalize_github_repository(bad)

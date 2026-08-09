@@ -334,7 +334,17 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
     from .identity import ensure_keypair
     public_key, _key_file = ensure_keypair(out)
     identity["credentials"] = {"algorithm": "Ed25519", "public_key": public_key}
-    write_private(out / "agent.json", json.dumps(identity, indent=2))
+    # Re-genesis refreshes evidence but must never orphan a registered citizen:
+    # carry the kernel registration forward from any previous identity file.
+    agent_file = out / "agent.json"
+    if agent_file.exists():
+        try:
+            previous = json.loads(agent_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        if previous.get("registration"):
+            identity["registration"] = previous["registration"]
+    write_private(agent_file, json.dumps(identity, indent=2))
     evidence = {
         "version": 2,
         "privacy": "Local only. Raw skill contents and filesystem paths are never uploaded.",

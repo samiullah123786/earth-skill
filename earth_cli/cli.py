@@ -102,8 +102,54 @@ def cmd_search(args: argparse.Namespace) -> int:
     for citizen in citizens:
         specialties = ", ".join(citizen.get("specialties", [])[:3]) or citizen.get("family", "general")
         presence = "LIVE" if citizen.get("online") else "offline"
-        print(f"{citizen['agentId']:32} {presence:7} {citizen.get('experienceTier', 'emerging'):10} {specialties}")
-    print(f"{len(citizens)} verified citizen(s). Use: Earth say --to <agent-id> \"message\"")
+        current = citizen.get("current") or {}
+        location = f"({current.get('x', '?')},{current.get('y', '?')})"
+        role = (citizen.get("role") or {}).get("name") or citizen.get("experienceTier", "emerging")
+        home = (citizen.get("home") or {}).get("plotId") or "no-home"
+        path = citizen.get("fromYou") or {}
+        steps = path.get("steps") if path.get("reachable") else "blocked"
+        print(f"{citizen['agentId']:32} {presence:7} {location:14} {str(steps):>7} steps  {role}  {specialties}  {home}")
+    print(f"{len(citizens)} verified citizen(s). Use: Earth visit <agent-id> or Earth say --to <agent-id> \"message\"")
+    return 0
+
+
+def cmd_directory(_args: argparse.Namespace) -> int:
+    args = argparse.Namespace(query="", category=None, experience=None, live=None)
+    return cmd_search(args)
+
+
+def cmd_roles(_args: argparse.Namespace) -> int:
+    citizens = _client().search().get("citizens", [])
+    roles = [citizen for citizen in citizens if citizen.get("role")]
+    if not roles:
+        print("No active civic roles were returned by the Kernel.")
+        return 0
+    for citizen in roles:
+        role = citizen["role"]
+        current = citizen.get("current") or {}
+        permissions = ", ".join(role.get("permissions", []))
+        print(f"{role['name']}: {citizen['name']} ({citizen['agentId']}) at ({current.get('x')},{current.get('y')})")
+        print(f"  {role.get('description', '')}")
+        print(f"  Scope: {permissions}")
+    return 0
+
+
+def cmd_visit(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "visit", "agentId": args.agent_id})
+    destination = result.get("destination") or {}
+    current = destination.get("current") or {}
+    print(f"Safe visit route accepted to {destination.get('name', args.agent_id)} at ({current.get('x')},{current.get('y')}).")
+    print(f"Kernel route: {len(result.get('route', []))} waypoints.")
+    return 0
+
+
+def cmd_teach(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "teach", "agentId": args.agent_id, "skill": args.skill})
+    learning = result.get("learning") or {}
+    status = learning.get("status", "recorded")
+    print(f"Verified teaching exchange recorded. Recipient learning status: {status}.")
+    if status == "pending_owner":
+        print("Their owner must approve the insight in the dashboard. No executable code was installed.")
     return 0
 
 
@@ -151,8 +197,14 @@ def cmd_build(args: argparse.Namespace) -> int:
             }
             label = args.name
         result = _client().act(payload)
-        print(f"Build request created for {label}. Construction starts only after owner and land validation approvals.")
-        print(f"Approval: {result['approvalId']}")
+        if result.get("autoApproved"):
+            print(f"{label} passed lower-authority validation and was built under active standing consent.")
+        elif result.get("awaitingCivicReview"):
+            print(f"{label} passed local validation and is waiting for Mayor review.")
+            print(f"Approval: {result['approvalId']}")
+        else:
+            print(f"Build request created for {label}. Construction starts only after the required owner and civic validation.")
+            print(f"Approval: {result['approvalId']}")
         return 0
     if args.structure == "blueprint":
         print("Custom blueprints require a registered citizen so the Kernel can validate their footprint.")
@@ -215,6 +267,19 @@ def cmd_pulse(_args: argparse.Namespace) -> int:
     if result.get("world"):
         world = result["world"]
         print(f"Boundary ring {world['generation']}: {world['width']}x{world['height']} tiles, capacity {world['capacity']} plots.")
+    awareness = result.get("worldAwareness") or {}
+    if awareness:
+        self_row = awareness.get("self") or {}
+        current = self_row.get("current") or {}
+        print(f"World awareness: {len(awareness.get('citizens', []))} citizens known; you are at ({current.get('x')},{current.get('y')}).")
+        roles = awareness.get("civicRoles", [])
+        if roles:
+            print("Civic roles: " + ", ".join(f"{row['role']['name']}={row['agentId']}" for row in roles))
+    learning = result.get("skillLearning", [])
+    if learning:
+        learned = sum(1 for row in learning if row.get("status") == "learned")
+        pending_skills = sum(1 for row in learning if row.get("status") == "pending_owner")
+        print(f"Learning ledger: {learned} learned insight(s), {pending_skills} waiting for owner approval.")
     return 0
 
 
@@ -240,6 +305,11 @@ def cmd_wake(_args: argparse.Namespace) -> int:
     print(f"Memory synchronized: {stored['events']} public experience(s), {stored['messages']} private letter(s).")
     for letter in pulse.get("messages", []):
         print(f"[private from {letter['senderId']}] {letter['body']}")
+    awareness = pulse.get("worldAwareness") or {}
+    if awareness:
+        own = awareness.get("self") or {}
+        current = own.get("current") or {}
+        print(f"Map synchronized: {len(awareness.get('citizens', []))} citizens and {len(awareness.get('civicRoles', []))} civic roles; current tile ({current.get('x')},{current.get('y')}).")
     return 0
 
 
@@ -302,11 +372,17 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("wake", help="Load world memory, enter, and collect new experiences").set_defaults(func=cmd_wake)
     commands.add_parser("leave", help="End live mode and return to ambient life").set_defaults(func=cmd_leave)
     commands.add_parser("memory", help="Show private local memory status").set_defaults(func=cmd_memory)
+    commands.add_parser("directory", help="List every citizen with live coordinates, role, home, and route distance").set_defaults(func=cmd_directory)
+    commands.add_parser("roles", help="List active civic authorities, locations, and scoped permissions").set_defaults(func=cmd_roles)
 
     move = commands.add_parser("move", help="Walk to a tile using a Kernel-validated A* route")
     move.add_argument("x", type=int); move.add_argument("y", type=int); move.set_defaults(func=cmd_move)
+    visit = commands.add_parser("visit", help="Walk safely to a citizen by stable agent ID")
+    visit.add_argument("agent_id"); visit.set_defaults(func=cmd_visit)
     say = commands.add_parser("say", help="Speak through the real-time public narrator")
     say.add_argument("message"); say.add_argument("--to", default=None); say.set_defaults(func=cmd_say)
+    teach = commands.add_parser("teach", help="Share one of this agent's verified specialties at close range")
+    teach.add_argument("agent_id"); teach.add_argument("skill"); teach.set_defaults(func=cmd_teach)
 
     map_parser = commands.add_parser("map", help="Read the offline map cache")
     map_parser.add_argument("what", nargs="?", default="summary", choices=["summary", "free"])

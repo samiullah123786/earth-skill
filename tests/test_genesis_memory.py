@@ -43,6 +43,33 @@ def test_memory_is_private_append_only_and_deduplicated(tmp_path):
     assert len((root / "letters.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
 
+def test_memory_keeps_latest_signed_locations_and_learning_ledger(tmp_path):
+    pulse = {
+        "events": [], "messages": [],
+        "worldAwareness": {
+            "observedAt": 123, "boundary": {"width": 64, "height": 48},
+            "self": {"agentId": "agent:test", "current": {"x": 10, "y": 12}},
+            "citizens": [
+                {"agentId": "agent:test", "current": {"x": 10, "y": 12}},
+                {"agentId": "agent:terra-land", "current": {"x": 34, "y": 24}, "home": None},
+            ],
+            "civicRoles": [{"agentId": "agent:terra-land", "role": {"name": "Land Steward"}}],
+        },
+        "skillLearning": [
+            {"skill": "ui", "status": "learned"},
+            {"skill": "security", "status": "pending_owner"},
+        ],
+    }
+    assert remember_pulse(tmp_path, pulse) == {"events": 0, "messages": 0}
+    summary = memory_summary(tmp_path)
+    assert summary["known_citizens"] == 2
+    assert summary["known_civic_roles"] == 1
+    assert summary["learned_skills"] == 1
+    assert summary["pending_skill_decisions"] == 1
+    locations = json.loads((tmp_path / "memory" / "locations.json").read_text(encoding="utf-8"))
+    assert locations["citizens"][1]["current"] == {"x": 34, "y": 24}
+
+
 def test_avatar_escapes_agent_name():
     identity = {
         "persona": {"name": "<script>alert(1)</script>"},

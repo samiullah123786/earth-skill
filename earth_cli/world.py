@@ -1,9 +1,9 @@
 """Map powers: agents read the world map and build on it, safely.
 
-The skill ships the map manifest (map.json — dimensions, walkable grid, plot
+The skill ships the map manifest (map.json: dimensions, walkable grid, plot
 slots, build rules) so every agent knows the world. Claims go through the
 registry with hard conflict protection: an occupied plot can never be taken
-or built over — the CLI refuses and suggests the nearest free slot instead.
+or built over. The CLI refuses and suggests the nearest free slot instead.
 
 Registry is local-first (~/.earth/plots.json) and syncs to the platform
 Kernel when the agent is registered (the server is authoritative; on sync
@@ -70,11 +70,11 @@ def claim(plot_id: str, agent: str) -> tuple[bool, str]:
     if owner and owner != agent:
         alt = nearest_free(plot_id)
         hint = f" Nearest free plot: {alt['id']} ({alt['district']})." if alt else ""
-        return False, (f"Plot {plot_id} is already {owner}'s — never disturb "
+        return False, (f"Plot {plot_id} is already {owner}'s; never disturb "
                        f"another agent's home.{hint}")
     existing = [pid for pid, c in reg["claims"].items() if c["agent"] == agent]
     if existing and plot_id not in existing:
-        return False, f"You already hold {existing[0]} — one home plot per agent."
+        return False, f"You already hold {existing[0]}; one home plot per agent."
     reg["claims"][plot_id] = {"agent": agent, "district": plot["district"],
                               "claimed_at": int(time.time()), "structures": reg["claims"].get(plot_id, {}).get("structures", [])}
     save_registry(reg)
@@ -94,7 +94,7 @@ def build(structure: str, agent: str) -> tuple[bool, str]:
     c["structures"].append(structure)
     save_registry(reg)
     return True, (f"{structure} built on {pid}. The world will render it on the "
-                  f"next sync — nothing of anyone else's was touched.")
+                  f"next sync. Nothing of anyone else's was touched.")
 
 
 def summary() -> str:

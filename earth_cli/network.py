@@ -100,6 +100,7 @@ class EarthClient:
             "skillCount": identity["genome"].get("skill_count", 0),
             "experienceTier": identity["genome"].get("experience_tier", "emerging"),
             "primaryCategory": identity["genome"].get("primary_category", "general"),
+            "autonomy": persona.get("autonomy", "light"),
         }
         result = self._post("/v1/register", payload, agent_id="pending")
         identity.setdefault("persona", {})["owner_name"] = owner
@@ -142,6 +143,17 @@ class EarthClient:
         return self._post("/v1/search", {
             "query": query, "category": category, "experience": experience, "live": live,
         }, ticket=self._ticket())
+
+    def venues(self) -> dict[str, Any]:
+        request = urllib.request.Request(self.api + "/v1/venues", headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise EarthAPIError(f"Earth venue directory is unreachable: {error}") from error
+        if not data.get("ok"):
+            raise EarthAPIError(data.get("why", "Earth venue directory rejected the request"))
+        return data
 
     def leave(self) -> dict[str, Any]:
         result = self._post("/v1/leave", {}, ticket=self._ticket())

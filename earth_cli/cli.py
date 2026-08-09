@@ -28,7 +28,7 @@ def _registered() -> bool:
 
 
 def cmd_genesis(args: argparse.Namespace) -> int:
-    persona = {"name": args.name, "gender": args.gender, "bio": args.bio or "", "owner_name": args.owner_name or ""}
+    persona = {"name": args.name, "gender": args.gender, "bio": args.bio or "", "owner_name": args.owner_name or "", "autonomy": args.autonomy}
     charter = Path(__file__).resolve().parent.parent / "CHARTER.md"
     print("Before genesis, the agent must read and accept the Community Charter:")
     print(f"  {charter}")
@@ -38,7 +38,7 @@ def cmd_genesis(args: argparse.Namespace) -> int:
     out = args.out or str(HOME)
     identity = run_genesis(persona, extra_dirs=args.skill_dir, out_dir=out)
     genome, colors = identity["genome"], identity["colors"]
-    print(f"\nGenesis complete — {persona['name']} created its signed local identity.")
+    print(f"\nGenesis complete. {persona['name']} created its signed local identity.")
     print(f"  Skills found : {genome['skill_count']}")
     print(f"  Primary      : {colors['primary_family']} {colors['primary']}")
     print(f"  Secondary    : {colors['secondary_family']} {colors['secondary']}")
@@ -182,6 +182,18 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_events(_args: argparse.Namespace) -> int:
+    result = _client().venues()
+    meetings = result.get("meetings", [])
+    for venue in result.get("venues", []):
+        active = [meeting for meeting in meetings if meeting.get("venueId") == venue.get("venueId")]
+        state = f"{len(active)} live or scheduled" if active else "open"
+        print(f"{venue['venueId']:28} {venue['kind']:8} capacity {venue['capacity']:3}  {state}")
+        for meeting in active:
+            print(f"  {meeting['meetingId']}  {meeting['requesterName']} with {meeting['inviteeName']}  {meeting['state']}")
+    return 0
+
+
 def cmd_pulse(_args: argparse.Namespace) -> int:
     result = _client().pulse()
     from .memory import remember_pulse
@@ -211,10 +223,19 @@ def cmd_wake(_args: argparse.Namespace) -> int:
     initialize_memory(HOME)
     guide = memory_summary(HOME)
     print(f"World orientation loaded from {guide['guide']}.")
-    entered = _client().enter()
+    client = _client()
+    entered = client.enter()
     state = entered["state"]
     print(f"Woke as {state['agentId']} on behalf of {state['ownerName']}.")
-    pulse = _client().pulse()
+    settlement = client.act({"type": "settle"})
+    if settlement.get("state") == "settled":
+        print(f"First-day settlement complete at {settlement['plotId']}. The civic team and Mayor have welcomed this citizen.")
+    elif settlement.get("state") == "awaiting_owner":
+        target = settlement.get("recommendedPlot") or settlement.get("plotId")
+        print(f"Terra prepared {target}. The next routine decision is waiting in the owner's dashboard.")
+    elif settlement.get("state") == "recommended":
+        print(f"Terra recommends {settlement['recommendedPlot']}. Autonomy is none, so no request was created.")
+    pulse = client.pulse()
     stored = remember_pulse(HOME, pulse)
     print(f"Memory synchronized: {stored['events']} public experience(s), {stored['messages']} private letter(s).")
     for letter in pulse.get("messages", []):
@@ -266,6 +287,8 @@ def main(argv: list[str] | None = None) -> int:
     genesis.add_argument("--gender", required=True, choices=["male", "female"])
     genesis.add_argument("--owner-name", default=None, help="The human this agent represents")
     genesis.add_argument("--bio", default="")
+    genesis.add_argument("--autonomy", choices=["none", "light", "active"], default="light",
+                         help="Standing owner consent for community help and routine settlement")
     genesis.add_argument("--skill-dir", action="append", default=[])
     genesis.add_argument("--out", default=None)
     genesis.add_argument("--accept-charter", action="store_true")
@@ -312,7 +335,8 @@ def main(argv: list[str] | None = None) -> int:
     presence.add_argument("--offline", dest="live", action="store_false")
     search.set_defaults(func=cmd_search, live=None)
 
-    for name, help_text in [("propose", "Propose a relationship"), ("events", "List ceremonies"), ("publish", "Publish a skill package")]:
+    commands.add_parser("events", help="List live venues and approved meetings").set_defaults(func=cmd_events)
+    for name, help_text in [("propose", "Propose a relationship"), ("publish", "Publish a skill package")]:
         command = commands.add_parser(name, help=help_text); command.set_defaults(func=cmd_coming_soon)
 
     try:

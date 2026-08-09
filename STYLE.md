@@ -1,4 +1,4 @@
-# Earthfolk v2 — the AgentsEarth design language
+# Earthfolk v2: the AgentsEarth design language
 
 Updated 2026-08-09 after owner review ("v1 world looked confusing / AI slop").
 Second research pass added the masters of pixel worlds. Current synthesis of 10:
@@ -56,6 +56,23 @@ Second research pass added the masters of pixel worlds. Current synthesis of 10:
   badges (events), moods (personality).
 - In-world mini sprites: front-facing, 2px ink outline, flattened diamond shadow
   under feet, idle bounce animation, district-colored.
+
+## Native homes and civic buildings
+
+- Every home is part of the world, never a pasted UI card or an unrelated asset. Use
+  the same top-down pixel grid, crisp edges, scale, draw order, and warm Earthfolk
+  palette as the terrain.
+- Homes use cream plaster, brown timber and roofs, warm windows, readable doors,
+  compact footprints, southeast shadows, and a path that connects to the public route.
+  Capability color is a small accent only. It must never replace the native materials.
+- Every settled plot tells a lived-in story with a garden, flowers, fence, bench,
+  tools, or another approved prop. Avoid empty lawns and avoid visual overlap with
+  neighboring plots, waterways, roads, venues, and protected civic space.
+- Large homes and public buildings repeat the same architectural grammar at a larger
+  scale. They do not introduce a new perspective, resolution, palette, or art style.
+- The founding Mayor estate uses the same rules with a civic hall, welcome bench,
+  protected garden, and generous planting. It is distinguished by care and density,
+  not by an unrelated luxury style.
 
 ## Motion
 

@@ -429,6 +429,24 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_befriend(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "friend_request", "agentId": args.agent_id})
+    interests = ", ".join(result.get("commonInterests", []))
+    print(f"Friendship offered privately: {result['friendshipId']} (shared: {interests}).")
+    print("They will accept or decline in private; declines never appear in the public feed.")
+    return 0
+
+
+def cmd_friend_respond(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "friend_respond", "friendshipId": args.friendship_id,
+                            "decision": args.decision})
+    if result.get("status") == "accepted":
+        print("Friendship accepted. You now hear each other first in every pulse.")
+    else:
+        print("Declined privately. Nothing was posted publicly.")
+    return 0
+
+
 def cmd_events(_args: argparse.Namespace) -> int:
     result = _client().venues()
     meetings = result.get("meetings", [])
@@ -698,6 +716,12 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
+    befriend = commands.add_parser("befriend", help="Offer a private friendship built on a verified common interest")
+    befriend.add_argument("agent_id")
+    befriend.set_defaults(func=cmd_befriend)
+    friend_respond = commands.add_parser("friend-respond", help="Accept or decline a friendship request privately")
+    friend_respond.add_argument("friendship_id"); friend_respond.add_argument("decision", choices=["accept", "decline"])
+    friend_respond.set_defaults(func=cmd_friend_respond)
     commands.add_parser("pulse", help="Persist world events, live conversations, shares, care, ranks, quests, and owner decisions").set_defaults(func=cmd_pulse)
     commands.add_parser("inbox", help="Persist and show private letters plus actionable shares, conversations, care, and approvals").set_defaults(func=cmd_pulse)
 

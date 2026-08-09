@@ -114,6 +114,49 @@ def git_remote_repository(skill_md: Path) -> str | None:
     return None
 
 
+def skill_source(local_path: str, repository: str | None) -> str:
+    """Classify where a skill came from, using only local evidence.
+
+    'plugin'  - installed through a plugin/marketplace cache
+    'github'  - a resolvable GitHub origin (git remote or declared frontmatter)
+    'local'   - present on this machine with no external origin we can verify
+    Never guesses 'self-made': authorship without evidence would be a claim.
+    """
+    normalized = local_path.replace("\\", "/").lower()
+    if "/plugins/cache/" in normalized or "/.claude/plugins/" in normalized:
+        return "plugin"
+    if repository:
+        return "github"
+    return "local"
+
+
+def discover_mcp_servers() -> list[str]:
+    """Collect configured MCP server names (names only, never URLs or env)."""
+    names: set[str] = set()
+
+    def harvest(node) -> None:
+        if isinstance(node, dict):
+            servers = node.get("mcpServers")
+            if isinstance(servers, dict):
+                names.update(str(key) for key in servers)
+            for value in node.values():
+                harvest(value)
+        elif isinstance(node, list):
+            for value in node:
+                harvest(value)
+
+    home = Path.home()
+    for config in [home / ".claude.json", home / ".claude" / "settings.json",
+                   home / ".cursor" / "mcp.json", home / ".codex" / "mcp.json"]:
+        if not config.is_file():
+            continue
+        try:
+            harvest(json.loads(config.read_text(encoding="utf-8", errors="ignore")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return sorted(names)[:40]
+
+
 def default_skill_dirs() -> list[Path]:
     home = Path.home()
     return [
@@ -158,6 +201,7 @@ def discover_skills(dirs: list[Path]) -> list[dict]:
                 "repository": github_repository(text) or git_remote_repository(skill_md),
                 "local_path": str(skill_md.resolve()),
             }
+            candidate["source"] = skill_source(candidate["local_path"], candidate["repository"])
             candidate["categories"] = skill_categories(candidate)
             # Plugin caches often contain several copies. The longest copy is
             # the most complete evidence and each logical skill counts once.
@@ -238,8 +282,11 @@ def build_personality(name: str, counts: Counter) -> dict:
     return levels
 
 
-def build_identity(persona: dict, skills: list[dict]) -> dict:
+def build_identity(persona: dict, skills: list[dict],
+                   mcp_servers: list[str] | None = None) -> dict:
     counts = Counter(classify(s) for s in skills)
+    provenance = Counter(s.get("source", "local") for s in skills)
+    repositories = sorted({s["repository"] for s in skills if s.get("repository")})
     categories = category_scores(skills)
     ranked = counts.most_common()
     ranked_categories = categories.most_common()
@@ -260,6 +307,11 @@ def build_identity(persona: dict, skills: list[dict]) -> dict:
             "evidence_digest": evidence_digest,
             "content_bytes_read": sum(s["content_bytes"] for s in skills),
             "skills": sorted(s["name"] for s in skills),
+            # A1 provenance: where each verified skill came from - counted,
+            # never claimed. Repos are public GitHub roots only, never paths.
+            "provenance": {source: count for source, count in provenance.most_common()},
+            "public_repositories": repositories[:24],
+            "mcp_server_count": len(mcp_servers or []),
         },
         "colors": {
             "primary": FAMILIES[primary]["color"],
@@ -275,7 +327,8 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
                 out_dir: str | Path = ".") -> dict:
     dirs = default_skill_dirs() + [Path(d) for d in (extra_dirs or [])]
     skills = discover_skills(dirs)
-    identity = build_identity(persona, skills)
+    mcp_servers = discover_mcp_servers()
+    identity = build_identity(persona, skills, mcp_servers)
     out = Path(out_dir)
     secure_directory(out)
     from .identity import ensure_keypair
@@ -286,9 +339,11 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
         "version": 2,
         "privacy": "Local only. Raw skill contents and filesystem paths are never uploaded.",
         "root_digest": identity["genome"]["evidence_digest"],
+        "mcp_servers": mcp_servers,
         "skills": [
             {"name": skill["name"], "digest": skill["digest"], "content_bytes": skill["content_bytes"],
              "repository": skill.get("repository"), "local_path": skill.get("local_path"),
+             "source": skill.get("source", "local"),
              "categories": skill.get("categories", ["general"])}
             for skill in sorted(skills, key=lambda item: item["name"])
         ],

@@ -63,6 +63,10 @@ def cmd_genesis(args: argparse.Namespace) -> int:
     print(f"  Primary      : {colors['primary_family']} {colors['primary']}")
     print(f"  Secondary    : {colors['secondary_family']} {colors['secondary']}")
     print(f"  Community    : {genome['primary_category']} · {genome['experience_tier']}")
+    sources = " · ".join(f"{count} {source}" for source, count in genome.get("provenance", {}).items())
+    if sources:
+        extras = f" · {genome['mcp_server_count']} MCP servers" if genome.get("mcp_server_count") else ""
+        print(f"  Sources      : {sources}{extras}")
     print(f"  Evidence     : read {genome['content_bytes_read']} bytes locally; raw contents stay private")
     print(f"  Identity     : {Path(out) / 'agent.json'}")
     print(f"  Private key  : {Path(out) / 'agent.key'} (never leaves this machine)")

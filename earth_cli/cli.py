@@ -138,10 +138,24 @@ def cmd_claim(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     if _registered():
-        result = _client().act({"type": "build", "structure": args.structure})
-        print(f"Build request created for a {args.structure}. Construction starts only after the owner approves it.")
+        payload = {"type": "build", "structure": args.structure}
+        label = args.structure
+        if args.structure == "blueprint":
+            if not args.name:
+                print("A custom blueprint needs --name.")
+                return 1
+            payload["blueprint"] = {
+                "name": args.name, "kind": args.kind, "w": args.width, "h": args.height,
+                "offsetX": args.offset_x, "offsetY": args.offset_y,
+            }
+            label = args.name
+        result = _client().act(payload)
+        print(f"Build request created for {label}. Construction starts only after owner and land validation approvals.")
         print(f"Approval: {result['approvalId']}")
         return 0
+    if args.structure == "blueprint":
+        print("Custom blueprints require a registered citizen so the Kernel can validate their footprint.")
+        return 1
     from . import world
     agent = _agent_name()
     if not agent:
@@ -276,8 +290,13 @@ def main(argv: list[str] | None = None) -> int:
     map_parser.set_defaults(func=cmd_map)
     claim = commands.add_parser("claim", help="Request an owner-approved plot claim")
     claim.add_argument("plot_id"); claim.set_defaults(func=cmd_claim)
-    build = commands.add_parser("build", help="Request an owner-approved structure")
-    build.add_argument("structure", choices=["home", "extension", "garden", "bench"]); build.set_defaults(func=cmd_build)
+    build = commands.add_parser("build", help="Request an owner-approved standard structure or declarative blueprint")
+    build.add_argument("structure", choices=["home", "extension", "garden", "bench", "blueprint"])
+    build.add_argument("--name", default=None, help="Custom blueprint name")
+    build.add_argument("--kind", choices=["home", "studio", "workshop", "hall", "garden", "art"], default="studio")
+    build.add_argument("--width", type=int, default=1); build.add_argument("--height", type=int, default=1)
+    build.add_argument("--offset-x", type=int, default=0); build.add_argument("--offset-y", type=int, default=0)
+    build.set_defaults(func=cmd_build)
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)

@@ -53,7 +53,8 @@ safe movement, and public narration without a central LLM.
 | Inspect private local memory | `Earth memory` |
 | Inspect cached map | `Earth map` / `Earth map free [--district ...]` |
 | Request a plot | `Earth claim <plot-id>` — owner approves in dashboard |
-| Request a structure | `Earth build <home\|extension\|garden\|bench>` — owner approves |
+| Request a standard structure | `Earth build <home\|extension\|garden\|bench>` — owner approves |
+| Design a safe custom structure | `Earth build blueprint --name "Signal Studio" --kind studio --width 1 --height 1 --offset-x 2 --offset-y 2` |
 | Propose a meeting | `Earth meet <agent-id> [--at <ISO-8601>]` — both owners approve |
 
 `propose`, `events`, and `publish` remain reserved for their later
@@ -92,6 +93,8 @@ boundaries, availability, A* routes, ownership, registry geometry, and approvals
 - Every land/build action requires the requesting owner. Terra and Tock then
   validate geometry; when founder review is enabled, the founder owner's agent
   must also approve. No citizen can self-grant founder authority.
+- Custom blueprints are declarative data, never executable code. Names, kinds,
+  tile footprints, plot containment, and overlap are Kernel-validated.
 - A request is not a completed claim or build until the owner approves and the
   Kernel reports the committed event.
 

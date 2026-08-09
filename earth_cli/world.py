@@ -16,6 +16,8 @@ import json
 import time
 from pathlib import Path
 
+from .private_io import secure_directory, write_private
+
 MANIFEST = Path(__file__).resolve().parent / "map.json"
 REGISTRY = Path.home() / ".earth" / "plots.json"
 
@@ -38,8 +40,8 @@ def load_registry() -> dict:
 
 
 def save_registry(reg: dict) -> None:
-    REGISTRY.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY.write_text(json.dumps(reg, indent=1), encoding="utf-8")
+    secure_directory(REGISTRY.parent)
+    write_private(REGISTRY, json.dumps(reg, indent=1))
 
 
 def free_plots(district: str | None = None) -> list[dict]:

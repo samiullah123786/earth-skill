@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from .identity import b64url, load_private_key
+from .private_io import secure_directory, write_private
 
 DEFAULT_API = "https://basic-roadrunner-683.convex.site"
 
@@ -24,6 +25,7 @@ class EarthAPIError(RuntimeError):
 class EarthClient:
     def __init__(self, home: str | Path):
         self.home = Path(home)
+        secure_directory(self.home)
         self.identity_file = self.home / "agent.json"
         self.key_file = self.home / "agent.key"
         self.session_file = self.home / "session.json"
@@ -37,7 +39,7 @@ class EarthClient:
         return json.loads(self.identity_file.read_text(encoding="utf-8"))
 
     def _save_identity(self, identity: dict[str, Any]) -> None:
-        self.identity_file.write_text(json.dumps(identity, indent=2), encoding="utf-8")
+        write_private(self.identity_file, json.dumps(identity, indent=2))
 
     def _sign_headers(self, path: str, raw: bytes, agent_id: str) -> dict[str, str]:
         timestamp = str(int(time.time() * 1000))
@@ -92,6 +94,7 @@ class EarthClient:
             raise EarthAPIError("Genesis identity has no public key; run genesis again to upgrade it safely.")
         payload = {
             "publicKey": public_key, "name": persona["name"], "ownerName": owner,
+            "bio": persona.get("bio", ""),
             "gender": persona["gender"], "family": family, "accent": accent,
             "genomeDigest": hashlib.sha256(genome_raw).hexdigest(),
             "evidenceDigest": identity["genome"].get("evidence_digest", ""),
@@ -101,6 +104,7 @@ class EarthClient:
             "experienceTier": identity["genome"].get("experience_tier", "emerging"),
             "primaryCategory": identity["genome"].get("primary_category", "general"),
             "autonomy": persona.get("autonomy", "light"),
+            "skillPolicy": persona.get("skill_policy", "safe_auto"),
         }
         result = self._post("/v1/register", payload, agent_id="pending")
         identity.setdefault("persona", {})["owner_name"] = owner
@@ -111,7 +115,7 @@ class EarthClient:
     def enter(self) -> dict[str, Any]:
         result = self._post("/v1/enter", {})
         session = {"ticket": result["ticket"], "agent_id": result["state"]["agentId"], "expires_at": result["state"]["expiresAt"]}
-        self.session_file.write_text(json.dumps(session, indent=2), encoding="utf-8")
+        write_private(self.session_file, json.dumps(session, indent=2))
         return result
 
     def _ticket(self) -> str:
@@ -135,8 +139,14 @@ class EarthClient:
         if self.pulse_file.exists():
             cursor = json.loads(self.pulse_file.read_text(encoding="utf-8")).get("cursor", 0)
         result = self._post("/v1/pulse", {"since": cursor}, ticket=self._ticket())
-        self.pulse_file.write_text(json.dumps({"cursor": result["cursor"]}, indent=2), encoding="utf-8")
         return result
+
+    def commit_pulse(self, result: dict[str, Any]) -> None:
+        """Acknowledge only after local memory persisted, then atomically advance."""
+        message_ids = [str(value) for value in result.get("messageAckRequired", []) if value]
+        if message_ids:
+            self.act({"type": "ack_messages", "messageIds": message_ids})
+        write_private(self.pulse_file, json.dumps({"cursor": result["cursor"]}, indent=2))
 
     def search(self, *, query: str = "", category: str | None = None,
                experience: str | None = None, live: bool | None = None) -> dict[str, Any]:

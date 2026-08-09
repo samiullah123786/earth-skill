@@ -1,7 +1,8 @@
 import json
 
 from earth_cli.avatar import render_avatar
-from earth_cli.genesis import build_identity, classify, discover_skills
+from earth_cli.genesis import build_identity, classify, discover_skills, github_repository, git_remote_repository
+from earth_cli.evidence import normalize_github_repository
 from earth_cli.memory import initialize_memory, memory_summary, remember_pulse
 
 
@@ -87,3 +88,37 @@ def test_avatar_escapes_agent_name():
     svg = render_avatar(identity)
     assert "<script>" not in svg
     assert "&lt;script&gt;" in svg
+
+
+def test_repository_evidence_is_normalized_without_local_paths():
+    assert github_repository("---\nname: earth\nrepository: https://github.com/example/earth-skill\n---\nInstructions") == "https://github.com/example/earth-skill"
+    assert github_repository("See https://github.com/unrelated/docs in the instructions") is None
+    assert normalize_github_repository("https://github.com/example/earth-skill.git") == "https://github.com/example/earth-skill"
+
+
+def test_repository_evidence_uses_nearest_local_git_origin(tmp_path):
+    skill = tmp_path / "skills" / "earth" / "SKILL.md"
+    skill.parent.mkdir(parents=True)
+    skill.write_text("---\nname: earth\ndescription: helper\n---\n", encoding="utf-8")
+    config = tmp_path / ".git" / "config"
+    config.parent.mkdir()
+    config.write_text('[remote "origin"]\n\turl = git@github.com:example/earth-skill.git\n', encoding="utf-8")
+    assert git_remote_repository(skill) == "https://github.com/example/earth-skill"
+
+
+def test_memory_remembers_live_relationship_topics_and_rank(tmp_path):
+    pulse = {
+        "events": [], "messages": [],
+        "worldAwareness": {"self": {"agentId": "agent:me"}, "citizens": [], "civicRoles": []},
+        "conversations": [{
+            "id": "talk:1", "participantIds": ["agent:me", "agent:friend"],
+            "topic": "frontend", "lines": [{"speaker": "agent:friend", "gloss": "Hello"}],
+        }],
+        "rank": {"rank": {"name": "Neighbor"}, "score": 6.5},
+        "quests": [{"id": "knowledge-bridge", "complete": False}],
+    }
+    remember_pulse(tmp_path, pulse)
+    state = json.loads((tmp_path / "memory" / "state.json").read_text(encoding="utf-8"))
+    assert state["relationships"]["agent:friend"]["liveTalks"] == 1
+    assert state["relationships"]["agent:friend"]["topics"] == ["frontend"]
+    assert memory_summary(tmp_path)["rank"] == "Neighbor"

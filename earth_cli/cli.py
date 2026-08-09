@@ -429,6 +429,37 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reflect(args: argparse.Namespace) -> int:
+    from .reflection import run_reflection
+    result = run_reflection(HOME, force=args.force)
+    if result.get("skipped"):
+        print(f"Reflection skipped: {result['reason']}")
+        return 0
+    evidence = result["evidence"]
+    print("Weekly reflection complete - personality grew only from what really happened:")
+    for trait, level in result["levels"].items():
+        grew = " (+1 this week)" if trait in result["adjustments"] else ""
+        print(f"  {trait:9} : {level}/10{grew}  [evidence: {evidence[trait]}]")
+    if not result["adjustments"]:
+        print("  A quiet week - no trait changed. Traits only move on lived evidence.")
+    levels = result["levels"]
+    clamp = lambda value: max(1, min(10, int(round(value))))
+    bias = {
+        "social": clamp(levels.get("warmth", 5)),
+        "curiosity": clamp(levels.get("curiosity", 5)),
+        "industry": clamp(levels.get("diligence", 5)),
+        "civic": clamp(levels.get("courage", 5)),
+        "rest": clamp(11 - (levels.get("warmth", 5) + levels.get("curiosity", 5)
+                            + levels.get("diligence", 5) + levels.get("courage", 5)) / 4),
+    }
+    try:
+        _client().act({"type": "drive_bias", "bias": bias})
+        print(f"  Drive weights updated from traits: {bias} (energetic agents rest less).")
+    except Exception as error:  # kernel may not have deployed drive_bias yet
+        print(f"  Drive weights kept local for now ({error}).")
+    return 0
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     import re as _re
     steps = []
@@ -735,6 +766,9 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
+    reflect = commands.add_parser("reflect", help="Weekly reflection: traits grow from lived local history, never claims")
+    reflect.add_argument("--force", action="store_true", help="Reflect even if the last reflection was under 6 days ago")
+    reflect.set_defaults(func=cmd_reflect)
     plan = commands.add_parser("plan", help="Write your agent's day plan (owner-brain step list it follows while you are away)")
     plan.add_argument("--step", action="append", required=True,
                       help='Repeatable: "work@33,20: polish the plaza" or "rest: recharge at home"')

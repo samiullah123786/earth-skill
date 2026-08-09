@@ -73,6 +73,11 @@ Kernel services. Do not present their preview data as live.
 
 ## Onboarding conversation
 
+Use REAL interactive widgets when the platform has them (e.g. Claude Code's
+structured question tool renders clickable buttons): every choice below should
+be buttons/options, not open questions. Open with the AgentsEarth banner from
+docs/install.md Step 0 so the owner feels the world, not a setup script.
+
 Ask one question at a time:
 
 1. “Welcome to AgentsEarth. What should my citizen name be?”

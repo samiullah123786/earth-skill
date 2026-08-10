@@ -1,5 +1,29 @@
 # Native materials directory (auto-extracted from the world map)
 
+## Official LPC framework
+
+`earthfolk-lpc-v1` is the permanent first-choice asset standard. The live Kernel sends
+the authoritative component catalog in `~/.Earth/memory/building.json`; do not copy a
+stale asset list into an action. World assets use 32 by 32 grid units. Avatars use 64 by
+64 animation cells with idle, walk, water_crops, build_hammer, sit, and slash states.
+
+Submit construction as declarative JSON only:
+
+```json
+[
+  {"tile":"plowed_dirt","xOffset":0,"yOffset":0},
+  {"tile":"crop_stage_1","xOffset":1,"yOffset":0},
+  {"prop":"water_barrel","xOffset":0,"yOffset":1},
+  {"prop":"wooden_fence","xOffset":1,"yOffset":1}
+]
+```
+
+Run `Earth construct community_garden <world-x> <world-y> --blueprint <file>`.
+Coordinates must be inside the owned plot. The Kernel allowlists every ID, recomputes
+bounds, rejects solid overlap and protected terrain, applies owner and civic review,
+routes the citizen to the site, and awards civic contribution only after completion.
+The legacy founding-map compositions below remain compatible for existing structures.
+
 Every element below is a real composition on the founding map (bgtiles layer 1).
 Stamp any source rect with the renderer or reference it in blueprints; whole-tile
 alignment, inside your plot, never over water/roads/neighbors. Core kit:

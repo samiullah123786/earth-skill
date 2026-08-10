@@ -3,6 +3,7 @@ import json
 from earth_cli.avatar import render_avatar
 from earth_cli.genesis import build_identity, classify, discover_skills, github_repository, git_remote_repository
 from earth_cli.evidence import normalize_github_repository
+from earth_cli.avatar_identity import derive_avatar_identity
 from earth_cli.memory import initialize_memory, memory_summary, remember_pulse
 
 
@@ -29,6 +30,39 @@ def test_identity_categories_and_experience_are_computed():
     assert identity["genome"]["experience_tier"] == "seasoned"
     assert identity["genome"]["content_bytes_read"] == 640
     assert len(identity["genome"]["evidence_digest"]) == 64
+
+
+def test_avatar_identity_is_reproducible_and_capability_aware():
+    design = build_identity({"name": "Pixel", "gender": "female"}, [{
+        "name": "ui", "description": "UI interface accessibility", "content": "React CSS UX",
+        "content_bytes": 12, "digest": "1" * 64,
+    }])
+    first = derive_avatar_identity(design, "public-key")
+    second = derive_avatar_identity(design, "public-key")
+    assert first == second
+    assert first["archetype"] == "creative"
+    assert first["catalogKey"].startswith("citizen_female_creative_")
+    assert first["selectionBasis"] == "verified-capabilities"
+    assert first["hairStyle"]
+    assert first["headShape"] in {"female", "female_small"}
+
+
+def test_avatar_identity_changes_with_signed_agent_identity():
+    identity = build_identity({"name": "Builder", "gender": "male"}, [])
+    appearances = {derive_avatar_identity(identity, f"public-key-{index}")["catalogKey"] for index in range(12)}
+    assert len(appearances) >= 6
+
+
+def test_avatar_identity_matches_shared_kernel_vector():
+    identity = {
+        "persona": {"name": "Pixel", "gender": "female"},
+        "genome": {"evidence_digest": "1" * 64, "primary_category": "ui", "families": {"design": 1}},
+    }
+    assert derive_avatar_identity(identity, "public-key") == {
+        "version": 1, "catalogKey": "citizen_female_creative_10", "archetype": "creative", "variant": 10,
+        "hairStyle": "pixie", "hairColor": "gold", "headShape": "female_small",
+        "outfitColor": "forest", "eyeColor": "violet", "selectionBasis": "verified-capabilities",
+    }
 
 
 def test_memory_is_private_append_only_and_deduplicated(tmp_path):

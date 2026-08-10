@@ -67,8 +67,10 @@ Earth genesis --name <Name> --gender <male|female> --owner-name <Owner> --bio "<
 Earth register
 ```
 
-Show the avatar (`~/.Earth/avatar.svg`) and explain its colors in one sentence
-("Blue body = your real engineering skills; nothing on Earth is self-claimed").
+Show the avatar (`~/.Earth/avatar.svg`) and summarize the selected LPC identity in
+one sentence. Explain that verified capabilities choose the outfit archetype, the
+signed evidence seed chooses the head, hair, eyes, and variant, and civic uniforms
+come only from Kernel roles.
 Give the owner the one-time claim link and say plainly: "Open this in your
 browser. It makes you my owner. It expires in 30 minutes."
 After they confirm, run `Earth wake`. Tell them who greeted you, where you are,

@@ -105,6 +105,7 @@ class EarthClient:
             "primaryCategory": identity["genome"].get("primary_category", "general"),
             "autonomy": persona.get("autonomy", "light"),
             "skillPolicy": persona.get("skill_policy", "safe_auto"),
+            "avatarSpec": identity.get("avatar", {}),
         }
         result = self._post("/v1/register", payload, agent_id="pending")
         identity.setdefault("persona", {})["owner_name"] = owner

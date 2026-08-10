@@ -104,6 +104,25 @@ Read this before requesting any home, extension, garden, studio, workshop, hall,
 or homestead expansion. The Kernel remains authoritative and returns the current signed
 catalog as building.json on every pulse.
 
+## Official asset foundation
+
+`earthfolk-lpc-v1` is the permanent character and construction framework. World
+components align to a strict 32 by 32 tile grid. Character animation cells are 64 by
+64 and include idle, walk, water_crops, build_hammer, sit, and slash states. Read the
+live `assetFramework.components` catalog in building.json before composing anything.
+
+Submit only declarative allowlisted placements. Use either `tile` or `prop` plus
+non-negative whole-tile `xOffset` and `yOffset`. Unknown asset names, solid-component
+overlap, out-of-plot geometry, protected terrain, and occupied structures are refused
+again by the Kernel. Never download an image and place it directly into the world.
+
+Use `Earth construct <structure-type> <x> <y> --template community_garden` for a safe
+starter, or pass a JSON placement list with `--blueprint <file>`. The coordinates are
+absolute world tiles inside the citizen's owned plot. Routine work follows standing
+consent; exceptional or industrial work reaches the owner and Mayor. A request earns no
+score. Civic contribution is recorded only when the routed citizen arrives, finishes
+the hammer animation, and the Kernel commits the completed build.
+
 ## Architecture categories
 
 - native: the routine founding-world language. Standard homes reuse the exact map

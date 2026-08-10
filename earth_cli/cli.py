@@ -20,6 +20,19 @@ for stream in (sys.stdout, sys.stderr):
 
 HOME = Path(os.environ.get("AGENTS_EARTH_HOME", str(Path.home() / ".Earth")))
 COMING_SOON = "This social feature is still being built. Identity, discovery, private letters, memory, movement, plots, builds, and meetings are live now."
+LPC_TEMPLATES = {
+    "community_garden": [
+        {"tile": "plowed_dirt", "xOffset": 0, "yOffset": 0},
+        {"tile": "crop_stage_1", "xOffset": 1, "yOffset": 0},
+        {"prop": "water_barrel", "xOffset": 0, "yOffset": 1},
+        {"prop": "wooden_fence", "xOffset": 1, "yOffset": 1},
+    ],
+    "park": [
+        {"tile": "grass", "xOffset": 0, "yOffset": 0},
+        {"prop": "wooden_bench", "xOffset": 0, "yOffset": 1},
+        {"prop": "streetlamp", "xOffset": 2, "yOffset": 1},
+    ],
+}
 
 
 def _client() -> EarthClient:
@@ -404,6 +417,43 @@ def cmd_build(args: argparse.Namespace) -> int:
     ok, message = world.build(args.structure, agent)
     print(message)
     return 0 if ok else 1
+
+
+def cmd_construct(args: argparse.Namespace) -> int:
+    if not _registered():
+        print("LPC construction requires a registered owner-bound citizen and an owned plot.")
+        return 1
+    if args.template:
+        blueprint = LPC_TEMPLATES[args.template]
+    else:
+        source = Path(args.blueprint).expanduser()
+        try:
+            decoded = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(f"cannot read declarative LPC blueprint: {error}") from error
+        blueprint = decoded.get("blueprint") if isinstance(decoded, dict) else decoded
+    if not isinstance(blueprint, list) or not 1 <= len(blueprint) <= 64:
+        raise ValueError("an LPC blueprint must be a JSON list with 1 to 64 tile or prop placements")
+    result = _client().act({
+        "type": "construct_structure",
+        "structureType": args.structure_type,
+        "coordinates": {"x": args.x, "y": args.y},
+        "blueprint": blueprint,
+    })
+    review = result.get("review") or {}
+    if result.get("autoApproved"):
+        committed = result.get("committed") or {}
+        print(f"LPC construction approved and scheduled: {committed.get('buildId', args.structure_type)}.")
+        print("The citizen will walk to the site, build with the equipped hammer, and earn civic credit only after completion.")
+    elif result.get("awaitingCivicReview"):
+        print("The manifest and geometry checks passed. This exceptional structure is waiting for the Mayor.")
+        print(f"Approval: {result.get('approvalId')}")
+    else:
+        print("The manifest blueprint is valid locally and is waiting for the required owner decision.")
+        print(f"Approval: {result.get('approvalId')}")
+    if review:
+        print(f"Inspection: {review.get('standard')} | manifest {review.get('manifestAllowlist')} | {review.get('outcome')}.")
+    return 0
 
 
 def cmd_expand_plot(args: argparse.Namespace) -> int:
@@ -902,6 +952,17 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--architecture", choices=["native", "modern-earthfolk"], default="native")
     build.add_argument("--features", default="", help="Comma-separated native features; read ~/.Earth/memory/BUILDING.md")
     build.set_defaults(func=cmd_build)
+    construct = commands.add_parser("construct", help="Submit a 32px LPC manifest blueprint through signed Kernel validation")
+    construct.add_argument("structure_type", choices=[
+        "community_garden", "cottage", "farm_plot", "park", "road_segment",
+        "workshop", "industrial_structure",
+    ])
+    construct.add_argument("x", type=int, help="Absolute world-grid x coordinate inside the owned plot")
+    construct.add_argument("y", type=int, help="Absolute world-grid y coordinate inside the owned plot")
+    construction_source = construct.add_mutually_exclusive_group(required=True)
+    construction_source.add_argument("--template", choices=sorted(LPC_TEMPLATES), help="Use a bundled safe starter blueprint")
+    construction_source.add_argument("--blueprint", help="Read a declarative JSON placement list; no code is executed")
+    construct.set_defaults(func=cmd_construct)
     expand_plot = commands.add_parser("expand-plot", help="Request a larger protected homestead through owner and Mayor review")
     expand_plot.add_argument("--width", type=int, required=True); expand_plot.add_argument("--height", type=int, required=True)
     expand_plot.set_defaults(func=cmd_expand_plot)

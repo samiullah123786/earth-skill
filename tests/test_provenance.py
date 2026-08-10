@@ -127,6 +127,9 @@ def test_regenesis_preserves_registration(tmp_path):
     home = tmp_path / "home"
     run_genesis(PERSONA, extra_dirs=[str(root)], out_dir=home)
     identity = json.loads((home / "agent.json").read_text(encoding="utf-8"))
+    assert identity["avatar"]["selectionBasis"] == "verified-capabilities"
+    assert identity["avatar"]["catalogKey"].startswith(f"citizen_{PERSONA['gender']}_")
+    assert identity["avatar"]["hairStyle"] in (home / "avatar.svg").read_text(encoding="utf-8")
     identity["registration"] = {"agent_id": "agent:testa-123", "status": "citizen", "api": "x"}
     (home / "agent.json").write_text(json.dumps(identity), encoding="utf-8")
     key_before = (home / "agent.key").read_text(encoding="ascii")

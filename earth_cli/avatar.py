@@ -17,6 +17,15 @@ GRID_W, GRID_H = 18, 20
 INK = "#1E1E1E"    # outline / borders
 CREAM = "#FDF6EC"  # canvas
 WHITE = "#FFFFFF"
+SKIN = "#E9B08A"
+HAIR_HEX = {
+    "black": "#231F25", "brown": "#5B3D2D", "auburn": "#90412B", "gold": "#D2A446",
+    "silver": "#B0B8BE", "indigo": "#49467D", "teal": "#317E79", "rose": "#9E4B63",
+}
+EYE_HEX = {
+    "brown": "#70452D", "hazel": "#8B7137", "green": "#3C8A52", "blue": "#4895C4",
+    "gray": "#7C8994", "violet": "#6F529D",
+}
 
 
 def _h(name: str, salt: str, mod: int) -> int:
@@ -58,18 +67,18 @@ class Sprite:
                 self.g[y][x] = INK
 
 
-def build_sprite(name: str, c1: str, c2: str) -> Sprite:
+def build_sprite(name: str, c1: str, c2: str, appearance: dict | None = None) -> Sprite:
     s = Sprite()
+    appearance = appearance or {}
     dark1 = _shade(c1, 0.72)
     wide = _h(name, "head", 2)          # 0: normal, 1: wide head
     hw = 12 if wide else 10             # head width
     hx = (GRID_W - hw) // 2
 
     # Head (rows 2-8) and body (rows 9-14)
-    s.fill(hx, 2, hw, 7, c1)
+    s.fill(hx, 2, hw, 7, SKIN)
     s.fill(4, 9, 10, 6, c1)
     # Side shading (right edge darker = chunky 3D feel)
-    s.fill(hx + hw - 2, 2, 2, 7, dark1)
     s.fill(12, 9, 2, 6, dark1)
 
     # Arms
@@ -83,20 +92,36 @@ def build_sprite(name: str, c1: str, c2: str) -> Sprite:
     s.fill(4 + lw + gap, 15, lw, 3, dark1)
 
     # Face plate (cream) inside head
-    s.fill(hx + 1, 3, hw - 3, 5, CREAM)
+    s.fill(hx + 1, 3, hw - 3, 5, SKIN)
+
+    # Complete deterministic hair. The in-world LPC renderer uses the same
+    # stored appearance fields with its higher-detail licensed layers.
+    hair_style = str(appearance.get("hairStyle", "bangs"))
+    hair = HAIR_HEX.get(str(appearance.get("hairColor", "brown")), HAIR_HEX["brown"])
+    s.fill(hx, 1, hw, 2, hair)
+    if hair_style in {"afro", "curly_short", "natural"}:
+        s.fill(hx - 1, 2, hw + 2, 2, hair)
+        s.px(hx, 0, hair); s.px(hx + hw - 1, 0, hair)
+    elif hair_style in {"long", "dreadlocks_short", "bob"}:
+        s.fill(hx, 2, 2, 7, hair); s.fill(hx + hw - 2, 2, 2, 7, hair)
+    elif hair_style in {"bangs", "curtains", "parted", "pixie", "spiked"}:
+        s.fill(hx + 1, 3, max(2, hw // 2), 1, hair)
+        if hair_style == "spiked":
+            s.px(hx + 2, 0, hair); s.px(hx + hw - 3, 0, hair)
 
     # Eyes: 0 square 2x2, 1 tall 2x3, 2 visor strip
     eye = _h(name, "eye", 3)
+    iris = EYE_HEX.get(str(appearance.get("eyeColor", "blue")), EYE_HEX["blue"])
     ey = 4
     if eye == 2:
         s.fill(hx + 2, ey, hw - 5, 2, INK)
-        s.px(hx + 3, ey, "#7DD3FC")     # visor glint
+        s.px(hx + 3, ey, iris)
     else:
         eh = 2 if eye == 0 else 3
         s.fill(hx + 2, ey, 2, eh, INK)
         s.fill(hx + hw - 5, ey, 2, eh, INK)
-        s.px(hx + 2, ey, WHITE)
-        s.px(hx + hw - 5, ey, WHITE)
+        s.px(hx + 2, ey, iris)
+        s.px(hx + hw - 5, ey, iris)
 
     # Mouth: 0 smile, 1 flat, 2 open
     mouth = _h(name, "mouth", 3)
@@ -117,23 +142,6 @@ def build_sprite(name: str, c1: str, c2: str) -> Sprite:
         if bits >> i & 1:
             s.px(7 + i % 3, 10 + i // 3, c2)
 
-    # Accessory in secondary color
-    acc = _h(name, "acc", 4)
-    if acc == 0:                        # antenna
-        s.px(mid, 1, c2)
-        s.px(mid, 0, INK)
-    elif acc == 1:                      # headphones
-        s.fill(hx - 1, 4, 1, 3, c2)
-        s.fill(hx + hw, 4, 1, 3, c2)
-        s.fill(hx, 1, hw, 1, c2)
-    elif acc == 2:                      # cap
-        s.fill(hx, 1, hw, 1, c2)
-        s.fill(hx + hw - 3, 0, 4, 1, c2)
-    else:                               # side spikes (hedgehog nod)
-        s.px(hx - 1, 3, c2)
-        s.px(hx + hw, 3, c2)
-        s.px(mid, 0, c2)
-
     s.outline()
     return s
 
@@ -149,7 +157,8 @@ def render_avatar(identity: dict) -> str:
     experience = identity["genome"].get("experience_tier", "emerging")
     resident = identity.get("stage") != "sprout"
 
-    sprite = build_sprite(name, c1, c2)
+    appearance = identity.get("avatar", {})
+    sprite = build_sprite(name, c1, c2, appearance)
 
     # Card geometry (neubrutalist: hard shadow, thick border, flat fills)
     card_w, card_h = 260, 322
@@ -202,8 +211,8 @@ def render_avatar(identity: dict) -> str:
         font-weight="700" fill="{INK}">{safe_name}</text>
   <!-- activity pixel strip (real capability spread) -->
   {"".join(strip)}
-  <text x="30" y="306" font-family="Consolas, monospace" font-size="11"
-        fill="{INK}" opacity="0.65">{identity["colors"]["primary_family"]}</text>
+  <text x="30" y="306" font-family="Consolas, monospace" font-size="9"
+        fill="{INK}" opacity="0.65">{escape(str(appearance.get("hairStyle", "hair")))} / {escape(str(appearance.get("eyeColor", "eyes")))}</text>
   <text x="230" y="306" text-anchor="end" font-family="Consolas, monospace"
         font-size="9" font-weight="700" fill="{INK}">{primary_category} · {experience}</text>
 </svg>'''

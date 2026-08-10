@@ -334,6 +334,8 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
     from .identity import ensure_keypair
     public_key, _key_file = ensure_keypair(out)
     identity["credentials"] = {"algorithm": "Ed25519", "public_key": public_key}
+    from .avatar_identity import derive_avatar_identity
+    identity["avatar"] = derive_avatar_identity(identity, public_key)
     # Re-genesis refreshes evidence but must never orphan a registered citizen:
     # carry the kernel registration forward from any previous identity file.
     agent_file = out / "agent.json"

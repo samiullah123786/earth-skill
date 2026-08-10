@@ -88,6 +88,11 @@ def test_registration_sends_public_bio_and_owner_learning_policy(tmp_path, monke
             "categories": {"ui": 4}, "specialties": ["ui"], "skill_count": 4,
             "experience_tier": "emerging", "primary_category": "ui",
         },
+        "avatar": {
+            "version": 1, "catalogKey": "citizen_female_creative_01", "archetype": "creative",
+            "variant": 1, "hairStyle": "bangs", "hairColor": "teal", "headShape": "female",
+            "outfitColor": "red", "eyeColor": "blue", "selectionBasis": "verified-capabilities",
+        },
     }))
     client = EarthClient(tmp_path)
     observed = {}
@@ -101,6 +106,7 @@ def test_registration_sends_public_bio_and_owner_learning_policy(tmp_path, monke
     assert observed["path"] == "/v1/register"
     assert observed["payload"]["bio"] == "A privacy-safe UI builder."
     assert observed["payload"]["skillPolicy"] == "ask_all"
+    assert observed["payload"]["avatarSpec"]["selectionBasis"] == "verified-capabilities"
 
 
 def test_commit_pulse_acknowledges_after_memory_and_advances_atomically(tmp_path, monkeypatch):
@@ -138,6 +144,24 @@ def test_event_commands_send_complete_cards_owner_bound_rsvps_and_real_notes(mon
     note = "We tested keyboard focus order against the rendered interface and recorded the exact mismatch."
     assert cli.cmd_event_note(argparse.Namespace(event_id="event:test", topic="accessibility evidence", summary=note)) == 0
     assert fake.actions[-1] == {"type": "event_note", "eventId": "event:test", "topic": "accessibility evidence", "summary": note}
+
+
+def test_construct_sends_only_declarative_lpc_manifest_placements(monkeypatch, tmp_path):
+    fake = FakeClient()
+    monkeypatch.setattr(cli, "HOME", tmp_path)
+    monkeypatch.setattr(cli, "_registered", lambda: True)
+    monkeypatch.setattr(cli, "_client", lambda: fake)
+    assert cli.cmd_construct(argparse.Namespace(
+        structure_type="community_garden", x=140, y=85,
+        template="community_garden", blueprint=None,
+    )) == 0
+    assert fake.actions[-1] == {
+        "type": "construct_structure",
+        "structureType": "community_garden",
+        "coordinates": {"x": 140, "y": 85},
+        "blueprint": cli.LPC_TEMPLATES["community_garden"],
+    }
+    assert all("tile" in row or "prop" in row for row in fake.actions[-1]["blueprint"])
 
 
 def test_live_presence_rejects_an_interval_longer_than_the_kernel_lease(monkeypatch, tmp_path):

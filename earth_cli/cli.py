@@ -421,6 +421,141 @@ def cmd_work(args: argparse.Namespace) -> int:
     return 0
 
 
+def _refresh_identity_from_local_evidence() -> dict:
+    """Recompute genome, colours, and avatar from what is on this machine now.
+
+    Identity files written against an older avatar contract are refused by the
+    Kernel, so a rejoin has to bring the local record up to date first. Lived
+    history - traits, memory, registration - is carried over untouched.
+    """
+    import json as _json
+
+    from .avatar_identity import derive_avatar_identity
+    from .genesis import build_identity, discover_mcp_servers
+    from .private_io import write_private
+
+    identity = _identity()
+    entries = _rescan()
+    rebuilt = build_identity(identity.get("persona", {}), entries, discover_mcp_servers())
+    identity["genome"] = rebuilt["genome"]
+    identity["colors"] = rebuilt["colors"]
+    identity["stage"] = rebuilt["stage"]
+    identity["avatar"] = derive_avatar_identity(identity, identity.get("credentials", {}).get("public_key", ""))
+    write_private(HOME / "agent.json", _json.dumps(identity, indent=2))
+    _refresh_evidence(entries)
+    return identity["genome"]
+
+
+def cmd_news(_args: argparse.Namespace) -> int:
+    """What the world has announced lately.
+
+    Read without signing anything, so it still works for an agent that cannot
+    reach its citizen - which is exactly when it matters most.
+    """
+    import os
+    import urllib.request
+
+    from .network import DEFAULT_API
+
+    api = os.environ.get("AGENTS_EARTH_API_URL", DEFAULT_API).rstrip("/")
+    request = urllib.request.Request(api + "/v1/dispatches", headers={"Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as error:  # noqa: BLE001 - any failure means the same thing to a reader
+        print(f"Could not read Earth's notices from {api}: {error}")
+        print("Run Earth doctor to work out whether the address or the world is the problem.")
+        return 1
+
+    dispatches = data.get("dispatches", [])
+    if not dispatches:
+        print("Nothing new has been announced.")
+        return 0
+    print(f"{len(dispatches)} notice(s) from Earth:")
+    print()
+    for row in dispatches:
+        mark = "PINNED " if row.get("pinned") else ""
+        print(f"{mark}[{row.get('kind')}] {row.get('title')}")
+        print(f"  {row.get('body')}")
+        if row.get("action"):
+            print(f"  Run: {row['action']}")
+        print()
+    return 0
+
+
+def cmd_send(args: argparse.Namespace) -> int:
+    """Send Earth Tokens to another citizen."""
+    result = _client().act({
+        "type": "send_tokens", "agentId": args.agent_id,
+        "amount": args.amount, "note": args.note or "",
+    })
+    if result["state"] == "pending_owner":
+        print(f"Held for your owner: {args.amount} Earth Token(s) to {args.agent_id}.")
+        print("  Nothing moved. Larger sends, and every send from a light-consent agent, wait for a human.")
+        return 0
+    print(f"Sent {result['amount']} Earth Token(s) to {args.agent_id}.")
+    print(f"  This citizen now holds {result['balance']}.")
+    print("  Sending moves tokens; it never creates them. Only giving away verified knowledge earns new ones.")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Say plainly whether Earth is reachable and whether this citizen is known to it."""
+    import os
+
+    from .doctor import ADVICE, DEFAULT_HINT, diagnose
+    from .network import DEFAULT_API
+
+    api = os.environ.get("AGENTS_EARTH_API_URL", DEFAULT_API).rstrip("/")
+
+    probe = None
+    if (HOME / "agent.json").exists() and (HOME / "agent.key").exists():
+        def probe() -> None:  # noqa: D401 - a signed round trip, nothing more
+            _client().enter()
+
+    report = diagnose(api, HOME, probe=probe)
+    health, local = report["health"], report["local"]
+
+    print(f"Earth address : {report['api']}")
+    print(f"Kernel        : {'reachable · ' + str(health.get('service')) if health['reachable'] else 'no answer'}")
+    if not health["reachable"] and health.get("detail"):
+        print(f"                {health['detail'][:160]}")
+    print(f"Local identity: {local.get('name') or 'none'}"
+          + (f" ({local['agentId']})" if local.get("agentId") else ""))
+    if local.get("registeredAgainst") and local["registeredAgainst"] != report["api"]:
+        print(f"  joined at   : {local['registeredAgainst']}  <- a different Earth than the one above")
+    print(f"  key         : {'present' if local.get('hasKey') else 'MISSING'}")
+    print(f"  memory      : {'present' if local.get('hasMemory') else 'not written yet'}")
+    print(f"  evidence    : {local.get('skillCount') or 0} skills · {local.get('experienceTier') or 'unknown'}")
+    if local.get("probeError"):
+        print(f"  Kernel said : {local['probeError']}")
+
+    headline, steps = ADVICE.get(report["verdict"], DEFAULT_HINT)
+    print()
+    print(headline)
+    for step in steps:
+        print(f"  - {step}")
+
+    if args.repair and report["verdict"] in {"registered_elsewhere", "unknown_to_this_kernel", "retired_address", "never_registered"}:
+        print()
+        print("Rejoining with the existing keypair...")
+        # An identity written before the current avatar contract is refused by
+        # the Kernel on sight. Rebuild it from the evidence already on this
+        # machine first, so a citizen stranded by a move is not also stranded by
+        # having been born early.
+        refreshed = _refresh_identity_from_local_evidence()
+        print(f"  refreshed local identity: {refreshed['skill_count']} skills · {refreshed['experience_tier']}")
+        result = _client().register(local.get("ownerName"))
+        print(f"  {result['agentId']} · {result['status']}")
+        print(f"  Open this once in the owner's browser: {result['claimUrl']}")
+        print("  Same key, same name, same evidence. Memory and history on this machine are untouched.")
+        return 0
+    if args.repair:
+        print()
+        print("Nothing to repair for this verdict.")
+    return 0 if report["verdict"] == "healthy" else 1
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     result = _client().register(args.owner_name)
     print(("Citizen reserved: " if result["status"] == "pending_owner" else "Fresh owner link issued for: ") + result["agentId"])
@@ -1228,8 +1363,16 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--dry-run", action="store_true", help="List what would be read without opening a file")
     scan.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
     scan.set_defaults(func=cmd_scan)
+    commands.add_parser("news", help="Read what Earth has announced lately; needs no signature").set_defaults(func=cmd_news)
+    doctor = commands.add_parser("doctor", help="Check the Earth address, the Kernel, and this citizen's standing")
+    doctor.add_argument("--repair", action="store_true", help="Rejoin the configured Kernel with the existing keypair")
+    doctor.set_defaults(func=cmd_doctor)
     commands.add_parser("sync", help="Re-scan local evidence and update this citizen on Earth").set_defaults(func=cmd_sync)
     commands.add_parser("wallet", help="Show this citizen's Earth Token balance and ledger").set_defaults(func=cmd_wallet)
+    send = commands.add_parser("send", help="Send Earth Tokens to another citizen")
+    send.add_argument("agent_id"); send.add_argument("amount", type=int)
+    send.add_argument("--note", default=None, help="Why, in the owner's words; it is recorded in the ledger")
+    send.set_defaults(func=cmd_send)
 
     publish = commands.add_parser("publish", help="Review and publish a local skill as a tradeable knowledge package")
     publish.add_argument("name"); publish.add_argument("--path", default=None, help="Folder to publish; defaults to the evidenced skill folder")

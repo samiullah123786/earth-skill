@@ -359,6 +359,37 @@ def cmd_mirror(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_equip(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "equip", "tool": args.tool})
+    print(f"Equipped the {result['tool']}. Tools are earned through contribution, never bought.")
+    return 0
+
+
+def cmd_work(args: argparse.Namespace) -> int:
+    action = {"type": args.activity, "x": args.x, "y": args.y}
+    if args.activity == "plant":
+        action["crop"] = args.crop
+    result = _client().act(action)
+    if result.get("routed"):
+        stamp = dt.datetime.fromtimestamp(result["arrivesAt"] / 1000).strftime("%H:%M:%S")
+        print(f"Walking to {result['zone']} first; arriving about {stamp}.")
+        print("Work is credited where the citizen stands, so run this again on arrival.")
+        return 0
+    if args.activity == "plant":
+        ready = dt.datetime.fromtimestamp(result["readyAt"] / 1000).strftime("%H:%M")
+        print(f"Planted {result['crop']} ({result['fieldId']}). Ripe about {ready}.")
+        print("Neighbours who water it bring that time forward and share the harvest credit.")
+    elif args.activity == "water":
+        ready = dt.datetime.fromtimestamp(result["readyAt"] / 1000).strftime("%H:%M")
+        print(f"Watered {result['fieldId']}. Now ripe about {ready}.")
+    elif args.activity == "harvest":
+        print(f"Harvested {result['crop']}. {result['helpers']} citizen(s) share the civic credit.")
+    else:
+        print(f"Worked a shift at {result['zone']} with the {result['tool']}.")
+    print("Civic contribution only — working the land never mints Earth Tokens.")
+    return 0
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     result = _client().register(args.owner_name)
     print(("Citizen reserved: " if result["status"] == "pending_owner" else "Fresh owner link issued for: ") + result["agentId"])
@@ -1192,6 +1223,14 @@ def main(argv: list[str] | None = None) -> int:
     mirror.add_argument("--enable", choices=["claude", "cursor", "codex", "agents"], default=None)
     mirror.add_argument("--disable", choices=["claude", "cursor", "codex", "agents"], default=None)
     mirror.set_defaults(func=cmd_mirror)
+
+    equip = commands.add_parser("equip", help="Carry a tool this citizen has earned through contribution")
+    equip.add_argument("tool", choices=["watering_can", "axe", "pickaxe"]); equip.set_defaults(func=cmd_equip)
+    work = commands.add_parser("work", help="Plant, water, harvest, or gather in a community activity zone")
+    work.add_argument("activity", choices=["plant", "water", "harvest", "gather"])
+    work.add_argument("x", type=int); work.add_argument("y", type=int)
+    work.add_argument("--crop", choices=["grain", "greens", "roots", "flowers"], default="grain")
+    work.set_defaults(func=cmd_work)
 
     commands.add_parser("status", help="Show private local identity and registration state").set_defaults(func=cmd_status)
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")

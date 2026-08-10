@@ -285,3 +285,110 @@ def test_wallet_is_honest_when_nothing_has_been_earned(monkeypatch, tmp_path, ca
     out = capsys.readouterr().out
     assert "Earth Tokens: 0" in out
     assert "No movements yet" in out
+
+
+def test_no_command_is_registered_twice():
+    """argparse lets a duplicate add_parser replace the first one silently.
+
+    That is how `Earth publish` shipped dead: the real parser was registered,
+    then overwritten by a coming-soon stub, so the command existed, accepted no
+    arguments, and told everyone the feature was unbuilt. No error was raised.
+    """
+    import argparse
+    import contextlib
+    import io
+
+    from earth_cli import cli
+
+    registered: list[str] = []
+    original = argparse._SubParsersAction.add_parser
+
+    def recording(self, name, **kwargs):
+        registered.append(name)
+        return original(self, name, **kwargs)
+
+    argparse._SubParsersAction.add_parser = recording
+    try:
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer), contextlib.suppress(SystemExit):
+            cli.main(["--help"])
+    finally:
+        argparse._SubParsersAction.add_parser = original
+
+    duplicates = {name for name in registered if registered.count(name) > 1}
+    assert not duplicates, f"these commands are registered twice and shadow each other: {sorted(duplicates)}"
+
+
+def test_publish_accepts_its_arguments():
+    """The dead-command symptom was a parser that took no arguments at all."""
+    import contextlib
+    import io
+
+    from earth_cli import cli
+
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer), contextlib.suppress(SystemExit):
+        cli.main(["publish", "--help"])
+    usage = buffer.getvalue()
+    for flag in ("--price", "--repo", "--license", "name"):
+        assert flag in usage, f"Earth publish lost {flag}; it is shadowed again"
+
+
+def test_a_skill_added_after_genesis_becomes_shareable(tmp_path, monkeypatch):
+    """Knowledge learned after birth is still real knowledge.
+
+    scan and sync used to refresh only the counts, leaving the evidence file
+    describing the machine as it was at genesis. A skill written afterwards was
+    counted in the genome but refused by every share and publish path.
+    """
+    import argparse
+    import json
+
+    from earth_cli import cli
+    from earth_cli.evidence import skill_evidence
+
+    home = tmp_path / ".Earth"
+    skills = tmp_path / "skills" / "late-arrival"
+    skills.mkdir(parents=True)
+    (skills / "SKILL.md").write_text(
+        "---\nname: late-arrival\ndescription: Written after genesis.\n---\n\n# Late Arrival\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cli, "HOME", home)
+    home.mkdir(parents=True)
+    (home / "agent.json").write_text(json.dumps({
+        "genome": {"evidence_digest": "c" * 64, "skill_count": 0},
+        "persona": {"name": "Test"},
+        "credentials": {"public_key": "k"},
+    }), encoding="utf-8")
+
+    from earth_cli.knowledge import add_root
+    add_root(home, str(skills.parent))
+    assert cli.cmd_scan(argparse.Namespace(add_root=None, remove_root=None, dry_run=False, yes=True)) == 0
+
+    # The gate every share and publish call goes through must now find it.
+    found = skill_evidence(home, "late-arrival")
+    assert found["name"] == "late-arrival"
+    assert len(found["digest"]) == 64
+
+
+def test_respond_package_reports_a_held_release_instead_of_crashing(monkeypatch, capsys):
+    """The gate returns pending_owner, which has no price to report.
+
+    The CLI assumed every accepted request was delivered, so a held release -
+    the safe path - ended in a KeyError traceback rather than an explanation.
+    """
+    import argparse
+
+    from earth_cli import cli
+
+    class Held:
+        def act(self, _action):
+            return {"ok": True, "state": "pending_owner", "approvalId": "abc123"}
+
+    monkeypatch.setattr(cli, "_client", lambda: Held())
+    code = cli.cmd_respond_package(argparse.Namespace(trade_id="trade:x", decline=False))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Held for your owner" in out
+    assert "only once they approve" in out

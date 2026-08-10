@@ -100,6 +100,21 @@ def _rescan() -> list[dict]:
     return discover_knowledge(skill_dirs, knowledge_roots=roots)
 
 
+def _refresh_evidence(entries: list[dict]) -> None:
+    """Keep the shareable evidence in step with what was just scanned.
+
+    Without this, a skill written or installed after genesis is counted in the
+    genome but cannot be shared or published: the evidence file still describes
+    the older machine, and every attempt is refused as "not present in this
+    agent's local genesis evidence".
+    """
+    if not (HOME / "agent.json").exists():
+        return  # Scanning before genesis is normal onboarding; genesis writes it.
+    identity = _identity()
+    from .genesis import discover_mcp_servers, write_evidence
+    write_evidence(HOME, identity, entries, discover_mcp_servers())
+
+
 def cmd_scan(args: argparse.Namespace) -> int:
     from .knowledge import add_root, load_roots, plan_scan, remove_root, write_index
     if args.add_root:
@@ -126,13 +141,21 @@ def cmd_scan(args: argparse.Namespace) -> int:
         print("\nDry run: no file was opened.")
         return 0
     if not args.yes:
-        answer = input("\nRead these files into this agent's private local knowledge bank? [y/N] ")
+        try:
+            answer = input("\nRead these files into this agent's private local knowledge bank? [y/N] ")
+        except EOFError:
+            # No one is at the keyboard. Consent cannot be assumed from silence,
+            # so say what to do instead of dying with a traceback.
+            print("\nScan needs the owner's consent and there is no terminal to ask in.")
+            print("Run it in an interactive shell, or pass --yes if you are the owner and have read the list above.")
+            return 1
         if answer.strip().lower() not in {"y", "yes"}:
             print("Scan declined. Nothing was read.")
             return 1
 
     entries = _rescan()
     write_index(HOME, entries)
+    _refresh_evidence(entries)
     from collections import Counter
     from .genesis import classify, experience_tier
     breadth = len(Counter(classify(entry) for entry in entries))
@@ -161,6 +184,7 @@ def cmd_sync(_args: argparse.Namespace) -> int:
     identity["avatar"] = derive_avatar_identity(identity, public_key)
     from .private_io import write_private
     write_private(HOME / "agent.json", json.dumps(identity, indent=2))
+    _refresh_evidence(entries)
 
     genome = identity["genome"]
     print(f"Local evidence refreshed: {genome['skill_count']} skills · {genome['primary_category']} · {genome['experience_tier']}")
@@ -274,6 +298,13 @@ def cmd_respond_package(args: argparse.Namespace) -> int:
     result = _client().act({"type": "respond_package", "tradeId": args.trade_id, "decision": decision})
     if result["state"] == "declined":
         print("Declined privately. Nothing was published about it.")
+        return 0
+    if result["state"] == "pending_owner":
+        # Standing consent covers routine, inert, inexpensive releases. Anything
+        # else waits: giving knowledge away is not an act an agent takes alone.
+        print("Held for your owner. Nothing left this agent.")
+        print("  The request is in the owner's Earth Skills queue with the package's safety flags.")
+        print("  It is delivered, and paid for, only once they approve.")
         return 0
     print(f"Delivered. {result['priceTokens']} Earth Token(s) moved in the same transaction.")
     return 0
@@ -1374,7 +1405,12 @@ def main(argv: list[str] | None = None) -> int:
     live.add_argument("--interval", type=int, default=45, help="Heartbeat seconds, 30-60")
     live.add_argument("--minutes", type=int, default=0, help="Stop after this many minutes; 0 waits for Ctrl+C")
     live.set_defaults(func=cmd_live)
-    for name, help_text in [("propose", "Propose a relationship"), ("publish", "Publish a skill package")]:
+    # Only genuinely unbuilt commands belong here. argparse lets a second
+    # add_parser with the same name quietly replace the first, so listing an
+    # implemented command here disables it without any error.
+    for name, help_text in [("propose", "Propose a relationship")]:
+        if name in commands.choices:
+            raise RuntimeError(f"{name!r} is already implemented; remove it from the reserved list")
         command = commands.add_parser(name, help=help_text); command.set_defaults(func=cmd_coming_soon)
 
     try:

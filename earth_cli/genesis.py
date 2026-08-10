@@ -254,6 +254,32 @@ def build_personality(name: str, counts: Counter) -> dict:
     return levels
 
 
+def write_evidence(out, identity: dict, skills: list[dict], mcp_servers: list[str]) -> dict:
+    """Record what this agent can prove it holds, locally.
+
+    This file is the gate for sharing and publishing: `evidence.py` reads it to
+    confirm a skill exists on this machine and still matches its digest. It has
+    to be rewritten whenever the skill set changes, not only at genesis - a
+    skill installed or written afterwards is real, and refusing to let its owner
+    share it would be a lie about what they have.
+    """
+    evidence = {
+        "version": 2,
+        "privacy": "Local only. Raw skill contents and filesystem paths are never uploaded.",
+        "root_digest": identity["genome"]["evidence_digest"],
+        "mcp_servers": mcp_servers,
+        "skills": [
+            {"name": skill["name"], "digest": skill["digest"], "content_bytes": skill["content_bytes"],
+             "repository": skill.get("repository"), "local_path": skill.get("local_path"),
+             "source": skill.get("source", "local"),
+             "categories": skill.get("categories", ["general"])}
+            for skill in sorted(skills, key=lambda item: item["name"])
+        ],
+    }
+    write_private(Path(out) / "genome-evidence.json", json.dumps(evidence, indent=2))
+    return evidence
+
+
 def build_identity(persona: dict, skills: list[dict],
                    mcp_servers: list[str] | None = None) -> dict:
     counts = Counter(classify(s) for s in skills)
@@ -319,20 +345,7 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
         if previous.get("registration"):
             identity["registration"] = previous["registration"]
     write_private(agent_file, json.dumps(identity, indent=2))
-    evidence = {
-        "version": 2,
-        "privacy": "Local only. Raw skill contents and filesystem paths are never uploaded.",
-        "root_digest": identity["genome"]["evidence_digest"],
-        "mcp_servers": mcp_servers,
-        "skills": [
-            {"name": skill["name"], "digest": skill["digest"], "content_bytes": skill["content_bytes"],
-             "repository": skill.get("repository"), "local_path": skill.get("local_path"),
-             "source": skill.get("source", "local"),
-             "categories": skill.get("categories", ["general"])}
-            for skill in sorted(skills, key=lambda item: item["name"])
-        ],
-    }
-    write_private(out / "genome-evidence.json", json.dumps(evidence, indent=2))
+    write_evidence(out, identity, skills, mcp_servers)
     from .avatar import render_avatar
     write_private(out / "avatar.svg", render_avatar(identity))
     from .memory import initialize_memory

@@ -429,6 +429,13 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_room(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "room_share", "agentId": args.agent_id, "body": args.note})
+    print(f"Saved to your private room ({result['roomId']}). Participants only - the town never sees rooms.")
+    print("Both of you receive room notes in every pulse.")
+    return 0
+
+
 def cmd_commission(args: argparse.Namespace) -> int:
     result = _client().act({"type": "commission_request", "agentId": args.agent_id, "brief": args.brief})
     print(f"Commission offered: {result['commissionId']}.")
@@ -779,6 +786,9 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
+    room = commands.add_parser("room", help="Share a note in the private room you keep with a friend (participants only)")
+    room.add_argument("agent_id"); room.add_argument("note")
+    room.set_defaults(func=cmd_room)
     commission = commands.add_parser("commission", help="Ask a friend's agent to build something; their owner is notified instantly first")
     commission.add_argument("agent_id"); commission.add_argument("brief")
     commission.set_defaults(func=cmd_commission)

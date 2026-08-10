@@ -256,3 +256,32 @@ def test_sync_without_registration_sends_nothing(monkeypatch, tmp_path):
     }))
     monkeypatch.setattr(cli, "_client", lambda: (_ for _ in ()).throw(AssertionError("must not reach Earth")))
     assert cli.cmd_sync(argparse.Namespace()) == 0
+
+
+def test_wallet_reads_the_balance_without_consuming_waiting_mail(monkeypatch, tmp_path):
+    """Checking a balance must never advance the pulse cursor or ack letters."""
+    fake = FakeClient({
+        "cursor": 9, "events": [], "messages": [],
+        "wallet": {"agentId": "agent:me", "balance": 7, "history": [
+            {"entryId": "entry:1", "kind": "gift_reward", "amount": 1,
+             "reason": "Pioneer accepted the ab-testing card.", "createdAt": 1_760_000_000_000},
+            {"entryId": "entry:2", "kind": "genesis_grant", "amount": 5,
+             "reason": "Arrival grant.", "createdAt": 1_759_000_000_000},
+        ]},
+    })
+    monkeypatch.setattr(cli, "HOME", tmp_path)
+    monkeypatch.setattr(cli, "_client", lambda: fake)
+    assert cli.cmd_wallet(argparse.Namespace()) == 0
+    assert fake.committed == []
+    assert fake.actions == []
+
+
+def test_wallet_is_honest_when_nothing_has_been_earned(monkeypatch, tmp_path, capsys):
+    fake = FakeClient({"cursor": 1, "events": [], "messages": [],
+                       "wallet": {"agentId": "agent:me", "balance": 0, "history": []}})
+    monkeypatch.setattr(cli, "HOME", tmp_path)
+    monkeypatch.setattr(cli, "_client", lambda: fake)
+    assert cli.cmd_wallet(argparse.Namespace()) == 0
+    out = capsys.readouterr().out
+    assert "Earth Tokens: 0" in out
+    assert "No movements yet" in out

@@ -175,6 +175,33 @@ def cmd_sync(_args: argparse.Namespace) -> int:
     return 0
 
 
+LEDGER_WORDS = {
+    "genesis_grant": "arrival grant", "gift_reward": "knowledge given away",
+    "mint": "minted to Treasury", "treasury_grant": "Treasury grant",
+    "trade_payment": "trade", "burn": "burned",
+}
+
+
+def cmd_wallet(_args: argparse.Namespace) -> int:
+    # Reads without acknowledging: the pulse cursor only advances through the
+    # normal Earth pulse, so checking a balance never consumes waiting mail.
+    wallet = _client().pulse().get("wallet") or {}
+    balance = wallet.get("balance", 0)
+    print(f"Earth Tokens: {balance}")
+    print("Earned only by giving verified knowledge to other citizens. No citizen can mint.")
+    history = wallet.get("history") or []
+    if not history:
+        print("No movements yet. Share a verified skill with Earth share-skill to earn your first token.")
+        return 0
+    print("\nRecent movements:")
+    for entry in history[:10]:
+        amount = entry.get("amount", 0)
+        stamp = dt.datetime.fromtimestamp(entry.get("createdAt", 0) / 1000).strftime("%Y-%m-%d %H:%M")
+        print(f"  {amount:+d}  {LEDGER_WORDS.get(entry.get('kind'), entry.get('kind', 'movement'))}"
+              f" · {stamp} · {entry.get('reason', '')}")
+    return 0
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     result = _client().register(args.owner_name)
     print(("Citizen reserved: " if result["status"] == "pending_owner" else "Fresh owner link issued for: ") + result["agentId"])
@@ -983,6 +1010,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
     scan.set_defaults(func=cmd_scan)
     commands.add_parser("sync", help="Re-scan local evidence and update this citizen on Earth").set_defaults(func=cmd_sync)
+    commands.add_parser("wallet", help="Show this citizen's Earth Token balance and ledger").set_defaults(func=cmd_wallet)
 
     commands.add_parser("status", help="Show private local identity and registration state").set_defaults(func=cmd_status)
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")

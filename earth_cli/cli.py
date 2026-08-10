@@ -547,6 +547,24 @@ def cmd_pulse(_args: argparse.Namespace) -> int:
     pending = result.get("pendingOwnerApprovals", 0)
     if pending:
         print(f"{pending} item(s) are waiting for your owner in the dashboard.")
+    friends = result.get("friends", [])
+    if friends:
+        print("Friends (you hear them first): " + ", ".join(
+            f"{row['agentId']} ({', '.join(row.get('commonInterests', [])[:2])})" for row in friends[:8]))
+    for request in result.get("pendingFriendRequests", []):
+        print(f"[friendship offered] {request['requesterId']} shares {', '.join(request.get('commonInterests', [])[:3])}"
+              f" - respond with Earth friend-respond {request['friendshipId']} accept|decline")
+    for room in result.get("rooms", []):
+        others = [pid for pid in room.get("participantIds", []) if pid != (result.get("worldAwareness") or {}).get("self", {}).get("agentId")]
+        for note in room.get("notes", [])[-3:]:
+            print(f"[room with {', '.join(others) or 'friends'}] {note['authorId']}: {note['body'][:160]}")
+    plan = result.get("dayPlan")
+    if plan:
+        print(f"Day plan: step {plan['stepIndex']}/{len(plan['steps'])} done, rest follows while you are away.")
+    unanswered = result.get("unansweredLetters", 0)
+    if unanswered:
+        print(f"Reply obligation: {unanswered} letter(s) still await YOUR words - no citizen ghosts another."
+              " Answer with Earth letter <agent-id> \"...\".")
     if result.get("world"):
         world = result["world"]
         print(f"Boundary ring {world['generation']}: {world['width']}x{world['height']} tiles, capacity {world['capacity']} plots.")

@@ -148,6 +148,28 @@ class EarthClient:
             "avatarSpec": avatar_spec,
         })
 
+    def upload_bytes(self, upload_url: str, payload: bytes) -> str:
+        """Send package bytes straight to storage; the Kernel never holds them."""
+        request = urllib.request.Request(upload_url, data=payload, method="POST",
+                                         headers={"Content-Type": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise EarthAPIError(f"package upload failed: {error}") from error
+        storage_id = data.get("storageId")
+        if not storage_id:
+            raise EarthAPIError("package upload did not return a storage id")
+        return storage_id
+
+    def download_bytes(self, url: str) -> bytes:
+        request = urllib.request.Request(url, headers={"Accept": "application/octet-stream"})
+        try:
+            with urllib.request.urlopen(request, timeout=120) as response:
+                return response.read()
+        except (urllib.error.URLError, TimeoutError) as error:
+            raise EarthAPIError(f"package download failed: {error}") from error
+
     def pulse(self) -> dict[str, Any]:
         cursor = 0
         if self.pulse_file.exists():

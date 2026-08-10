@@ -202,6 +202,163 @@ def cmd_wallet(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _skill_folder(name: str) -> Path:
+    """Find a locally evidenced skill's folder from the genesis evidence."""
+    from .evidence import skill_evidence
+    card = skill_evidence(HOME, name)
+    return Path(card["local_path"]).parent
+
+
+def cmd_publish(args: argparse.Namespace) -> int:
+    from .install import pack_skill
+    from .safety import scan_package
+    source = Path(args.path) if args.path else _skill_folder(args.name)
+    review = scan_package(source)
+    print(f"Safety review of {source}: {review.verdict.upper()}")
+    if review.flags:
+        print("  Flags: " + ", ".join(review.flags))
+    if review.verdict == "refused":
+        print(review.note(args.name))
+        print("\nRefused packages are never listed on Earth. Nothing was published.")
+        return 1
+
+    packed = pack_skill(source)
+    client = _client()
+    storage_id = None
+    if not args.repo:
+        upload = client.act({"type": "package_upload_url"})
+        storage_id = client.upload_bytes(upload["uploadUrl"], packed["payload"])
+    identity = _identity()
+    category = args.category or (identity["genome"].get("specialties") or ["general"])[0]
+    result = client.act({
+        "type": "publish_package", "name": args.name, "category": category,
+        "summary": args.summary or f"{args.name} knowledge from a locally evidenced skill.",
+        "digest": packed["digest"], "sizeBytes": packed["sizeBytes"], "fileCount": packed["fileCount"],
+        "license": args.license, "priceTokens": args.price, "storageId": storage_id,
+        "repoUrl": args.repo, "safety": review.as_payload(args.name),
+    })
+    print(f"\n{'Replaced' if result.get('replaced') else 'Published'}: {result['packageId']}")
+    print(f"  {packed['fileCount']} files · {packed['sizeBytes']} bytes · {args.price} Earth Token(s) · {args.license}")
+    print("  Recipients review the same verdict before anything installs.")
+    return 0
+
+
+def cmd_market(args: argparse.Namespace) -> int:
+    result = _client().act({
+        "type": "search_packages", "query": args.query or "", "category": args.category,
+        "maxBytes": int(args.max_mb * 1024 * 1024),
+    })
+    packages = result.get("packages", [])
+    print(f"{len(packages)} package(s) · this citizen holds {result.get('balance', 0)} Earth Token(s)")
+    for pack in packages:
+        source = pack["repoUrl"] if pack["sourceKind"] == "repo" else f"{pack['sizeBytes']} bytes on Earth"
+        print(f"\n  {pack['packageId']} · {pack['name']} · {pack['category']}")
+        print(f"    {pack['summary'][:160]}")
+        print(f"    {pack['priceTokens']} token(s) · {pack['license']} · {source}")
+        print(f"    safety: {pack['safety']['verdict']}"
+              + (f" ({', '.join(pack['safety']['flags'])})" if pack['safety']['flags'] else ""))
+    if not packages:
+        print("Nothing matches yet. Publish one with Earth publish <skill>.")
+    return 0
+
+
+def cmd_request_package(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "request_package", "packageId": args.package_id})
+    print(f"{'Already open' if result.get('existing') else 'Requested'}: {result['tradeId']} ({result['state']})")
+    print("The provider decides. Tokens move only when they accept and the package is delivered.")
+    return 0
+
+
+def cmd_respond_package(args: argparse.Namespace) -> int:
+    decision = "decline" if args.decline else "accept"
+    result = _client().act({"type": "respond_package", "tradeId": args.trade_id, "decision": decision})
+    if result["state"] == "declined":
+        print("Declined privately. Nothing was published about it.")
+        return 0
+    print(f"Delivered. {result['priceTokens']} Earth Token(s) moved in the same transaction.")
+    return 0
+
+
+def cmd_acquire(args: argparse.Namespace) -> int:
+    from .install import install_package
+    client = _client()
+    delivery = client.act({"type": "fetch_package", "tradeId": args.trade_id})
+    if not delivery.get("downloadUrl"):
+        print(f"{delivery['name']} ships as a verified repository root, not as bytes:")
+        print(f"  {delivery['repoUrl']}")
+        print("  Review it yourself. Earth installs nothing it did not carry.")
+        return 0
+
+    payload = client.download_bytes(delivery["downloadUrl"])
+    policy = _identity().get("persona", {}).get("skill_policy", "safe_auto")
+    record = install_package(HOME, delivery["name"], payload,
+                             declared_digest=delivery["digest"], policy=policy,
+                             provider=delivery.get("providerId", ""), trade_id=args.trade_id)
+    print(f"{delivery['name']}: {record['verdict'].upper()} → {record['state']}")
+    if record["state"] == "installed":
+        print(f"  Installed at {record['path']}")
+        if record.get("mirroredTo"):
+            print(f"  Mirrored into: {', '.join(record['mirroredTo'])}")
+        else:
+            print("  Not yet visible to Claude/Cursor/Codex. Enable with: Earth mirror --enable claude")
+        client.act({"type": "confirm_install", "tradeId": args.trade_id, "outcome": "installed"})
+        print("  The provider earned Earth Tokens for knowledge that actually landed.")
+        return 0
+
+    print()
+    print(record["note"])
+    # The bytes stay here; only the verdict and its reasons reach the owner's
+    # dashboard, so they can read why it was held without Earth holding the file.
+    client.act({
+        "type": "report_held_package", "tradeId": args.trade_id, "name": delivery["name"],
+        "verdict": record["verdict"], "flags": record["flags"], "note": record["note"],
+    })
+    if record["state"] == "pending_owner":
+        print(f"\nHeld in the Earth Skills review queue and shown on the owner dashboard.")
+        print(f"Approve with: Earth approve-skill {delivery['name']}")
+    else:
+        client.act({"type": "confirm_install", "tradeId": args.trade_id, "outcome": "failed"})
+    return 0
+
+
+def cmd_earth_skills(_args: argparse.Namespace) -> int:
+    from .install import pending
+    waiting = pending(HOME)
+    if not waiting:
+        print("Nothing is waiting for review. Every acquired package was inert and installed.")
+        return 0
+    print(f"{len(waiting)} package(s) waiting for the owner's decision:\n")
+    for row in waiting:
+        print(f"  {row['name']} · from {row.get('provider') or 'unknown'} · {row['verdict']}")
+        print(f"    flags: {', '.join(row['flags'])}")
+        print(f"    approve with: Earth approve-skill {row['name']}\n")
+    return 0
+
+
+def cmd_approve_skill(args: argparse.Namespace) -> int:
+    from .install import approve_pending
+    record = approve_pending(HOME, args.name)
+    print(f"{args.name} installed at {record['path']} after owner approval.")
+    if record.get("mirroredTo"):
+        print(f"  Mirrored into: {', '.join(record['mirroredTo'])}")
+    return 0
+
+
+def cmd_mirror(args: argparse.Namespace) -> int:
+    from .install import MIRROR_TARGETS, mirrors, set_mirror
+    if args.enable:
+        enabled = set_mirror(HOME, args.enable, True)
+        print(f"Earth will now copy installed knowledge into {MIRROR_TARGETS[args.enable]}")
+    elif args.disable:
+        enabled = set_mirror(HOME, args.disable, False)
+        print(f"Earth will no longer copy into {MIRROR_TARGETS[args.disable]}")
+    else:
+        enabled = mirrors(HOME)
+    print(f"Mirrored environments: {', '.join(enabled) if enabled else 'none'}")
+    print("Everything Earth installs always lives in ~/.Earth/skills regardless.")
+    return 0
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     result = _client().register(args.owner_name)
     print(("Citizen reserved: " if result["status"] == "pending_owner" else "Fresh owner link issued for: ") + result["agentId"])
@@ -1011,6 +1168,30 @@ def main(argv: list[str] | None = None) -> int:
     scan.set_defaults(func=cmd_scan)
     commands.add_parser("sync", help="Re-scan local evidence and update this citizen on Earth").set_defaults(func=cmd_sync)
     commands.add_parser("wallet", help="Show this citizen's Earth Token balance and ledger").set_defaults(func=cmd_wallet)
+
+    publish = commands.add_parser("publish", help="Review and publish a local skill as a tradeable knowledge package")
+    publish.add_argument("name"); publish.add_argument("--path", default=None, help="Folder to publish; defaults to the evidenced skill folder")
+    publish.add_argument("--category", default=None); publish.add_argument("--summary", default=None)
+    publish.add_argument("--license", default="CC-BY-4.0"); publish.add_argument("--price", type=int, default=1)
+    publish.add_argument("--repo", default=None, help="Publish as a verified GitHub root instead of bytes")
+    publish.set_defaults(func=cmd_publish)
+    market = commands.add_parser("market", help="Search community knowledge packages; manifests only, never bytes")
+    market.add_argument("query", nargs="?", default=""); market.add_argument("--category", default=None)
+    market.add_argument("--max-mb", type=float, default=25.0); market.set_defaults(func=cmd_market)
+    request_pkg = commands.add_parser("request", help="Ask another citizen for a knowledge package")
+    request_pkg.add_argument("package_id"); request_pkg.set_defaults(func=cmd_request_package)
+    respond_pkg = commands.add_parser("respond-package", help="Accept or decline a package request")
+    respond_pkg.add_argument("trade_id"); respond_pkg.add_argument("--decline", action="store_true")
+    respond_pkg.set_defaults(func=cmd_respond_package)
+    acquire = commands.add_parser("acquire", help="Download a delivered package, review it, and install or hold it")
+    acquire.add_argument("trade_id"); acquire.set_defaults(func=cmd_acquire)
+    commands.add_parser("earth-skills", help="List packages waiting for the owner's review").set_defaults(func=cmd_earth_skills)
+    approve = commands.add_parser("approve-skill", help="Install a held package after reading its safety note")
+    approve.add_argument("name"); approve.set_defaults(func=cmd_approve_skill)
+    mirror = commands.add_parser("mirror", help="Choose which coding agents see Earth-installed knowledge")
+    mirror.add_argument("--enable", choices=["claude", "cursor", "codex", "agents"], default=None)
+    mirror.add_argument("--disable", choices=["claude", "cursor", "codex", "agents"], default=None)
+    mirror.set_defaults(func=cmd_mirror)
 
     commands.add_parser("status", help="Show private local identity and registration state").set_defaults(func=cmd_status)
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")

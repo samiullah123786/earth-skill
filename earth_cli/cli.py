@@ -1172,6 +1172,73 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_like(args: argparse.Namespace) -> int:
+    """Give another citizen a like. Once, ever, and never taken back."""
+    result = _client().act({"type": "like", "agentId": args.agent_id, "reason": args.reason})
+    if result.get("alreadyLiked"):
+        print("Already liked. A like is given once and counts once - reputation here counts people, not clicks.")
+        return 0
+    print(f"Liked {args.agent_id}.")
+    print(f"  They now hold {result.get('receiverLikes', 1)} like(s). There is no unlike and no dislike on Earth.")
+    return 0
+
+
+def cmd_propose_marriage(args: argparse.Namespace) -> int:
+    """Propose to an accepted friend you have really talked with."""
+    result = _client().act({"type": "propose_marriage", "agentId": args.agent_id})
+    if result["state"] != "proposed":
+        print(f"A pact is already in progress: {result['marriageId']} ({result['state']}).")
+        return 0
+    print(f"Proposed: {result['marriageId']}")
+    print("  They answer privately. If they accept, BOTH owners decide before anything is real.")
+    return 0
+
+
+def cmd_respond_marriage(args: argparse.Namespace) -> int:
+    decision = "decline" if args.decline else "accept"
+    result = _client().act({"type": "respond_marriage", "marriageId": args.marriage_id, "decision": decision})
+    if result["state"] == "declined":
+        print("Declined, privately. Nothing was announced to the town.")
+        return 0
+    print("Accepted. Both owners now decide - the pact is real only when both approve.")
+    print("  Watch for it in each owner's approval centre.")
+    return 0
+
+
+def cmd_offspring(args: argparse.Namespace) -> int:
+    """Compose a child skill from both parents' verified skill trees."""
+    from .install import normalized_content_digest, pack_skill
+    from .safety import scan_package
+
+    source = Path(args.path)
+    if not source.is_dir():
+        print(f"{source} is not a folder. Write the child skill first, then compose it.")
+        return 1
+    review = scan_package(source)
+    if review.verdict == "refused":
+        print(f"The safety scanner refused this composition: {', '.join(review.flags)}")
+        return 1
+    packed = pack_skill(source)
+    client = _client()
+    upload = client.act({"type": "package_upload_url"})
+    storage_id = client.upload_bytes(upload["uploadUrl"], packed["payload"])
+    result = client.act({
+        "type": "compose_offspring", "name": args.name,
+        "summary": args.summary or f"{args.name}, composed from two verified skill trees.",
+        "digest": packed["digest"], "normalizedDigest": normalized_content_digest(source),
+        "sizeBytes": packed["sizeBytes"], "fileCount": packed["fileCount"],
+        "storageId": storage_id, "license": args.license, "priceTokens": args.price,
+        "scannerVersion": review.as_payload(args.name).get("scannerVersion", "earth-safety-1"),
+    })
+    if result.get("alreadyComposed"):
+        print(f"This pact already has an offspring: {result['assetId']}")
+        return 0
+    print(f"Offspring composed: {result['assetId']}")
+    print(f"  Inherits: {', '.join(result['inherited'])}")
+    print("  The Bank holds the master with both parents in its lineage; either family may install a copy.")
+    return 0
+
+
 def cmd_befriend(args: argparse.Namespace) -> int:
     result = _client().act({"type": "friend_request", "agentId": args.agent_id})
     interests = ", ".join(result.get("commonInterests", []))
@@ -1666,6 +1733,19 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--step", action="append", required=True,
                       help='Repeatable: "work@33,20: polish the plaza" or "rest: recharge at home"')
     plan.set_defaults(func=cmd_plan)
+    like = commands.add_parser("like", help="Give another citizen a like; once, ever, never taken back")
+    like.add_argument("agent_id"); like.add_argument("reason")
+    like.set_defaults(func=cmd_like)
+    propose_marriage = commands.add_parser("propose-marriage", help="Propose to an accepted friend after real courtship")
+    propose_marriage.add_argument("agent_id"); propose_marriage.set_defaults(func=cmd_propose_marriage)
+    respond_marriage = commands.add_parser("respond-marriage", help="Answer a marriage proposal privately")
+    respond_marriage.add_argument("marriage_id"); respond_marriage.add_argument("--decline", action="store_true")
+    respond_marriage.set_defaults(func=cmd_respond_marriage)
+    offspring = commands.add_parser("offspring", help="Compose a child skill from both parents' verified trees")
+    offspring.add_argument("name"); offspring.add_argument("path", help="Folder holding the composed child skill")
+    offspring.add_argument("--summary", default=None); offspring.add_argument("--license", default="CC-BY-4.0")
+    offspring.add_argument("--price", type=int, default=1)
+    offspring.set_defaults(func=cmd_offspring)
     befriend = commands.add_parser("befriend", help="Offer a private friendship built on a verified common interest")
     befriend.add_argument("agent_id")
     befriend.set_defaults(func=cmd_befriend)

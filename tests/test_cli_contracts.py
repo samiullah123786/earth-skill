@@ -23,6 +23,13 @@ class FakeClient:
             return {"status": action["decision"] + "d"}
         if action.get("type") == "offline_letter":
             return {"messageId": "message:test"}
+        if action.get("type") == "event_propose":
+            return {"eventId": "event:test", "state": "approved", "autoApproved": True,
+                    "venue": {"venueId": "venue:plaza", "name": "Founding Plaza"}}
+        if action.get("type") == "event_rsvp":
+            return {"eventId": action["eventId"], "status": "accepted" if action["decision"] == "accept" else "declined"}
+        if action.get("type") == "event_note":
+            return {"eventId": action["eventId"], "topic": action["topic"]}
         return {"mode": "live", "state": "active", "conversationId": "talk:test"}
 
     def pulse(self):
@@ -30,6 +37,9 @@ class FakeClient:
 
     def commit_pulse(self, pulse):
         self.committed.append(pulse)
+
+    def community_events(self):
+        return {"events": []}
 
 
 def test_talk_is_atomic_live_only_and_letter_is_atomic_offline_only(monkeypatch, tmp_path):
@@ -106,6 +116,34 @@ def test_commit_pulse_acknowledges_after_memory_and_advances_atomically(tmp_path
     client.commit_pulse({"cursor": 123, "messageAckRequired": ["message:1", "message:2"]})
     assert actions == [{"type": "ack_messages", "messageIds": ["message:1", "message:2"]}]
     assert json.loads((tmp_path / "pulse.json").read_text())["cursor"] == 123
+
+
+def test_event_commands_send_complete_cards_owner_bound_rsvps_and_real_notes(monkeypatch, tmp_path):
+    fake = FakeClient()
+    monkeypatch.setattr(cli, "HOME", tmp_path)
+    monkeypatch.setattr(cli, "_client", lambda: fake)
+    at = "2026-09-01T12:00:00Z"
+    assert cli.cmd_event_propose(argparse.Namespace(
+        title="Interface Evidence Circle", summary="Compare concrete keyboard and focus-order evidence together.",
+        kind="workshop", at=at, minutes=45, capacity=10, venue=None, important=False,
+    )) == 0
+    assert fake.actions[-1] == {
+        "type": "event_propose", "title": "Interface Evidence Circle",
+        "summary": "Compare concrete keyboard and focus-order evidence together.",
+        "kind": "workshop", "startsAt": 1788264000000, "durationMinutes": 45,
+        "capacity": 10, "venueId": None, "importance": "routine",
+    }
+    assert cli.cmd_event_rsvp(argparse.Namespace(event_id="event:test", decision="accept")) == 0
+    assert fake.actions[-1] == {"type": "event_rsvp", "eventId": "event:test", "decision": "accept"}
+    note = "We tested keyboard focus order against the rendered interface and recorded the exact mismatch."
+    assert cli.cmd_event_note(argparse.Namespace(event_id="event:test", topic="accessibility evidence", summary=note)) == 0
+    assert fake.actions[-1] == {"type": "event_note", "eventId": "event:test", "topic": "accessibility evidence", "summary": note}
+
+
+def test_live_presence_rejects_an_interval_longer_than_the_kernel_lease(monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, "HOME", tmp_path)
+    with pytest.raises(ValueError, match="30-60"):
+        cli.cmd_live(argparse.Namespace(interval=75, minutes=0))
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX mode bits are not authoritative on Windows")

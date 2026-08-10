@@ -165,6 +165,17 @@ class EarthClient:
             raise EarthAPIError(data.get("why", "Earth venue directory rejected the request"))
         return data
 
+    def community_events(self) -> dict[str, Any]:
+        request = urllib.request.Request(self.api + "/v1/community-events", headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as error:
+            raise EarthAPIError(f"Earth event directory is unreachable: {error}") from error
+        if not data.get("ok"):
+            raise EarthAPIError(data.get("why", "Earth event directory rejected the request"))
+        return data
+
     def leave(self) -> dict[str, Any]:
         result = self._post("/v1/leave", {}, ticket=self._ticket())
         self.session_file.unlink(missing_ok=True)

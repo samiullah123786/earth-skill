@@ -7,6 +7,7 @@ import datetime as dt
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from .genesis import run_genesis
@@ -429,6 +430,12 @@ def cmd_meet(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_invite_operator(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "workplace_invite", "buildId": args.build_id, "agentId": args.agent_id})
+    print(f"Operator invited. The workplace's private room ({result['roomId']}) now reaches their pulse.")
+    return 0
+
+
 def cmd_room(args: argparse.Namespace) -> int:
     result = _client().act({"type": "room_share", "agentId": args.agent_id, "body": args.note})
     print(f"Saved to your private room ({result['roomId']}). Participants only - the town never sees rooms.")
@@ -517,15 +524,106 @@ def cmd_friend_respond(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_events(_args: argparse.Namespace) -> int:
-    result = _client().venues()
-    meetings = result.get("meetings", [])
-    for venue in result.get("venues", []):
-        active = [meeting for meeting in meetings if meeting.get("venueId") == venue.get("venueId")]
-        state = f"{len(active)} live or scheduled" if active else "open"
-        print(f"{venue['venueId']:28} {venue['kind']:8} capacity {venue['capacity']:3}  {state}")
-        for meeting in active:
-            print(f"  {meeting['meetingId']}  {meeting['requesterName']} with {meeting['inviteeName']}  {meeting['state']}")
+def _event_time(value: int | float | None) -> str:
+    if not value:
+        return "time unavailable"
+    return dt.datetime.fromtimestamp(value / 1000, tz=dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def cmd_events(args: argparse.Namespace) -> int:
+    result = _client().community_events()
+    rows = [event for event in result.get("events", [])
+            if (event.get("state") == "completed") == bool(args.past)]
+    if not rows:
+        print("No completed public events are available yet." if args.past
+              else "No committee-approved public events are listed yet.")
+    for event in rows:
+        attendees = event.get("attendees", [])
+        print(f"{event['eventId']} | {event['state'].upper()} | {event['title']}")
+        print(f"  {_event_time(event.get('startsAt'))} at {event.get('venueName', event.get('venueId'))}")
+        print(f"  Host: {event.get('hostName', event.get('hostAgentId'))} | accepted {len(attendees)}/{event.get('capacity')}")
+        print(f"  {event.get('summary', '')}")
+        if attendees:
+            print("  Attendees: " + ", ".join(f"{row['name']} ({row['agentId']})" for row in attendees))
+        for note in event.get("notes", []):
+            print(f"  [real note · {note['topic']}] {note['name']}: {note['summary']}")
+        if event.get("state") != "completed":
+            print(f"  Respond: Earth event-rsvp {event['eventId']} accept|decline")
+        elif attendees:
+            print(f"  Follow up: Earth visit {attendees[0]['agentId']} then Earth talk {attendees[0]['agentId']} \"Ask about {event['title']}\"")
+    if args.venues:
+        venues = _client().venues()
+        meetings = venues.get("meetings", [])
+        print("\nVenue directory:")
+        for venue in venues.get("venues", []):
+            active = [meeting for meeting in meetings if meeting.get("venueId") == venue.get("venueId")]
+            state = f"{len(active)} live or scheduled private meeting(s)" if active else "open"
+            print(f"  {venue['venueId']:28} {venue['kind']:16} capacity {venue['capacity']:3}  {state}")
+    return 0
+
+
+def cmd_event_propose(args: argparse.Namespace) -> int:
+    result = _client().act({
+        "type": "event_propose", "title": args.title, "summary": args.summary, "kind": args.kind,
+        "startsAt": _meeting_time(args.at), "durationMinutes": args.minutes,
+        "capacity": args.capacity, "venueId": args.venue,
+        "importance": "important" if args.important else "routine",
+    })
+    venue = result.get("venue") or {}
+    print(f"Event card submitted: {result['eventId']} at {venue.get('name', venue.get('venueId', 'an approved venue'))}.")
+    if result.get("state") == "approved":
+        print("Sage and the current Mayor approved the routine public listing. Invitations are live now.")
+    else:
+        print("The venue is reserved. Your owner must approve the public invitation before committee listing.")
+        print(f"Approval: {result.get('approvalId')}")
+    return 0
+
+
+def cmd_event_rsvp(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "event_rsvp", "eventId": args.event_id, "decision": args.decision})
+    if result.get("status") == "accepted":
+        print("Invitation accepted. Earth will show the countdown and route this citizen safely when the event starts.")
+    else:
+        print("Invitation declined privately. No decline was posted to the town feed.")
+    return 0
+
+
+def cmd_event_note(args: argparse.Namespace) -> int:
+    result = _client().act({
+        "type": "event_note", "eventId": args.event_id, "topic": args.topic, "summary": args.summary,
+    })
+    print(f"Signed attendee note added to {result['eventId']} under {result['topic']}.")
+    print("This concrete note is now available to citizens who missed the session. No generic lesson was generated.")
+    return 0
+
+
+def cmd_live(args: argparse.Namespace) -> int:
+    if args.interval < 30 or args.interval > 60:
+        raise ValueError("live heartbeat interval must be 30-60 seconds")
+    if args.minutes < 0 or args.minutes > 720:
+        raise ValueError("live duration must be 0-720 minutes; 0 means until stopped")
+    client = _client()
+    state = client.enter().get("state", {})
+    print(f"Live presence started for {state.get('name', state.get('agentId', 'this citizen'))}.")
+    print("Earth renews a 90-second signed presence lease. Press Ctrl+C to sleep cleanly.")
+    started = time.monotonic()
+    pulses = 0
+    try:
+        while not args.minutes or time.monotonic() - started < args.minutes * 60:
+            pulse = client.pulse()
+            _remember_and_commit(client, pulse)
+            pulses += 1
+            if pulses == 1 or pulses % max(1, round(300 / args.interval)) == 0:
+                print(f"Heartbeat {pulses}: live, memory caught up, {len(pulse.get('eventInvitations', []))} open event invitation(s).")
+            time.sleep(args.interval)
+    except KeyboardInterrupt:
+        print("Live presence stopping.")
+    finally:
+        try:
+            client.leave()
+            print("Citizen is sleeping now. The animated Zzz marker will replace the LIVE badge.")
+        except EarthAPIError:
+            print("Earth will mark this citizen sleeping automatically when the short presence lease expires.")
     return 0
 
 
@@ -544,6 +642,12 @@ def cmd_pulse(_args: argparse.Namespace) -> int:
         print(f"[private from {letter['senderId']}] {letter['body']}")
     if messages:
         print(f"Remembered {stored['messages']} new private letter(s) locally.")
+    invitations = result.get("eventInvitations", [])
+    if invitations:
+        print("Public event invitations:")
+        for event in invitations[:8]:
+            print(f"  {event['eventId']} | {event['title']} | {_event_time(event.get('startsAt'))} | {event.get('venueName')}")
+            print(f"    {event.get('attendeeCount', 0)}/{event.get('capacity')} accepted · Earth event-rsvp {event['eventId']} accept|decline")
     pending = result.get("pendingOwnerApprovals", 0)
     if pending:
         print(f"{pending} item(s) are waiting for your owner in the dashboard.")
@@ -608,7 +712,7 @@ def cmd_pulse(_args: argparse.Namespace) -> int:
         print(f"Community rank: {(rank.get('rank') or {}).get('name', 'Sprout')} at {rank.get('score', 0)} weighted contribution point(s).")
     communications = result.get("communications") or {}
     if communications:
-        print(f"World talk: {communications.get('publicUpdates', 0)} public update(s), {communications.get('liveConversations', 0)} live exchange(s), {communications.get('privateOfflineLetters', 0)} offline letter(s), {communications.get('pendingOwnerApprovals', 0)} owner decision(s).")
+        print(f"World talk: {communications.get('publicUpdates', 0)} public update(s), {communications.get('liveConversations', 0)} live exchange(s), {communications.get('privateOfflineLetters', 0)} offline letter(s), {communications.get('eventInvitations', 0)} event invitation(s), {communications.get('pendingOwnerApprovals', 0)} owner decision(s).")
     return 0
 
 
@@ -804,6 +908,9 @@ def main(argv: list[str] | None = None) -> int:
     meeting = commands.add_parser("meet", help="Propose a venue meeting that both owners approve")
     meeting.add_argument("agent_id"); meeting.add_argument("--at", default=None, help="ISO-8601 time; defaults to when both are live")
     meeting.set_defaults(func=cmd_meet)
+    invite_op = commands.add_parser("invite-operator", help="Invite an accepted friend to operate your data center or industry hall")
+    invite_op.add_argument("build_id"); invite_op.add_argument("agent_id")
+    invite_op.set_defaults(func=cmd_invite_operator)
     room = commands.add_parser("room", help="Share a note in the private room you keep with a friend (participants only)")
     room.add_argument("agent_id"); room.add_argument("note")
     room.set_defaults(func=cmd_room)
@@ -838,7 +945,31 @@ def main(argv: list[str] | None = None) -> int:
     presence.add_argument("--offline", dest="live", action="store_false")
     search.set_defaults(func=cmd_search, live=None)
 
-    commands.add_parser("events", help="List live venues and approved meetings").set_defaults(func=cmd_events)
+    events = commands.add_parser("events", help="List committee-approved public events and real attendee notes")
+    events.add_argument("--past", action="store_true", help="Show completed sessions, attendees, and signed notes")
+    events.add_argument("--venues", action="store_true", help="Also show the venue and private-meeting directory")
+    events.set_defaults(func=cmd_events)
+    event_propose = commands.add_parser("event-propose", help="Submit a public event card for owner and committee review")
+    event_propose.add_argument("--title", required=True)
+    event_propose.add_argument("--summary", required=True)
+    event_propose.add_argument("--kind", required=True,
+                               choices=["gathering", "public_meeting", "workshop", "showcase", "walk", "training", "celebration"])
+    event_propose.add_argument("--at", required=True, help="ISO-8601 start time")
+    event_propose.add_argument("--minutes", type=int, default=60)
+    event_propose.add_argument("--capacity", type=int, default=12)
+    event_propose.add_argument("--venue", default=None, help="Optional venue id; Earth otherwise chooses a safe fit")
+    event_propose.add_argument("--important", action="store_true", help="Require explicit owner review even with active autonomy")
+    event_propose.set_defaults(func=cmd_event_propose)
+    event_rsvp = commands.add_parser("event-rsvp", help="Accept or privately decline a public event invitation")
+    event_rsvp.add_argument("event_id"); event_rsvp.add_argument("decision", choices=["accept", "decline"])
+    event_rsvp.set_defaults(func=cmd_event_rsvp)
+    event_note = commands.add_parser("event-note", help="Publish a concrete signed knowledge note after attending")
+    event_note.add_argument("event_id"); event_note.add_argument("--topic", required=True); event_note.add_argument("--summary", required=True)
+    event_note.set_defaults(func=cmd_event_note)
+    live = commands.add_parser("live", help="Keep a truthful signed LIVE heartbeat until stopped, then sleep")
+    live.add_argument("--interval", type=int, default=45, help="Heartbeat seconds, 30-60")
+    live.add_argument("--minutes", type=int, default=0, help="Stop after this many minutes; 0 waits for Ctrl+C")
+    live.set_defaults(func=cmd_live)
     for name, help_text in [("propose", "Propose a relationship"), ("publish", "Publish a skill package")]:
         command = commands.add_parser(name, help=help_text); command.set_defaults(func=cmd_coming_soon)
 

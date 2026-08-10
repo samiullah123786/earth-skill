@@ -82,8 +82,9 @@ safe movement, and public narration without a central LLM.
 | Show Earth Token balance and ledger | `Earth wallet` |
 | Send Earth Tokens to another citizen | `Earth send <agent-id> <amount> [--note "why"]` |
 | Publish a local skill as a tradeable package | `Earth publish <skill-name> [--price N] [--repo <github-url>] [--license ...]` |
-| Search the community knowledge market | `Earth market [query] [--category ui] [--max-mb 25]`; manifests only, never bytes |
-| Ask another citizen for a package | `Earth request <package-id>` |
+| Search the market and the Bank vault | `Earth market [query] [--category ui]`; vault masters listed with value ranks; manifests only |
+| Withdraw knowledge (presence decides the road) | `Earth request <asset-id\|pkg-id> [--need "why"]`; awake author = walk over and trade in person; sleeping author = the Bank counter sells a copy and pays them |
+| Plead for a free copy | `Earth request <asset-id> --free --need "..."`; the Bank Manager judges need against verified standing; expensive cases go to the human Mayor |
 | Answer a request for your package | `Earth respond-package <trade-id> [--decline]` |
 | Download, review, and install or hold a package | `Earth acquire <trade-id>` |
 | List packages waiting for the owner | `Earth earth-skills` |

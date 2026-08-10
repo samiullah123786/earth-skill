@@ -368,8 +368,19 @@ def cmd_market(args: argparse.Namespace) -> int:
         "type": "search_packages", "query": args.query or "", "category": args.category,
         "maxBytes": int(args.max_mb * 1024 * 1024),
     })
+    vault = result.get("vault", [])
     packages = result.get("packages", [])
-    print(f"{len(packages)} package(s) · this citizen holds {result.get('balance', 0)} Earth Token(s)")
+    print(f"{len(vault)} vault asset(s) · {len(packages)} peer package(s) · this citizen holds {result.get('balance', 0)} Earth Token(s)")
+    if vault:
+        print()
+        print("EARTH BANK VAULT (masters stay banked; you withdraw a copy):")
+        for asset in vault:
+            rank = f"{asset['valueRank']}/5" if asset.get("valueRank") else "unappraised"
+            mine = " · yours" if asset.get("mine") else ""
+            print(f"  {asset['assetId']} · {asset['title']}")
+            print(f"    {asset['summary']}")
+            print(f"    {', '.join(asset['categories'])} · {asset['sizeBytes']} bytes · {asset['license']} · {asset['priceTokens']} token(s) · value {rank}{mine}")
+        print("  Withdraw: Earth request <asset-id> [--need \"why\"] · free plea: add --free")
     for pack in packages:
         source = pack["repoUrl"] if pack["sourceKind"] == "repo" else f"{pack['sizeBytes']} bytes on Earth"
         print(f"\n  {pack['packageId']} · {pack['name']} · {pack['category']}")
@@ -383,6 +394,33 @@ def cmd_market(args: argparse.Namespace) -> int:
 
 
 def cmd_request_package(args: argparse.Namespace) -> int:
+    if str(args.package_id).startswith("asset:"):
+        result = _client().act({
+            "type": "request_asset", "assetId": args.package_id,
+            "need": args.need or "", "free": bool(args.free),
+        })
+        mode = result.get("mode")
+        if mode == "live_trade":
+            print(f"The author is awake, so this trade happens in person: {result['tradeId']}")
+            print("  You are walking over now; a conversation about the gap is already open.")
+            print("  The author accepts with: Earth respond-package <trade-id>  (payment and delivery follow at once)")
+        elif mode == "counter_routed":
+            print("The author sleeps, so the Bank counter will sell you a copy.")
+            print("  Walking to the Earth Bank now - run the same command again at the counter.")
+        elif mode == "counter_sale":
+            print(f"Bought at the Earth Bank counter for {result['priceTokens']} Earth Token(s); the sleeping author was paid in full.")
+            print(f"  Withdraw and review it: Earth acquire {result['tradeId']}")
+        elif mode == "free_pending":
+            print(f"Free plea filed: {result['grantId']}")
+            print("  The Bank Manager judges need against your verified standing; expensive or odd cases go to the Mayor.")
+            print("  The decision arrives as a Bank letter in your next Earth pulse.")
+        elif mode == "already_withdrawn":
+            print(f"This citizen already withdrew that knowledge: Earth acquire {result['tradeId']}")
+        return 0
+    return _request_peer_package(args)
+
+
+def _request_peer_package(args: argparse.Namespace) -> int:
     result = _client().act({"type": "request_package", "packageId": args.package_id})
     print(f"{'Already open' if result.get('existing') else 'Requested'}: {result['tradeId']} ({result['state']})")
     print("The provider decides. Tokens move only when they accept and the package is delivered.")
@@ -1488,8 +1526,11 @@ def main(argv: list[str] | None = None) -> int:
     market = commands.add_parser("market", help="Search community knowledge packages; manifests only, never bytes")
     market.add_argument("query", nargs="?", default=""); market.add_argument("--category", default=None)
     market.add_argument("--max-mb", type=float, default=25.0); market.set_defaults(func=cmd_market)
-    request_pkg = commands.add_parser("request", help="Ask another citizen for a knowledge package")
-    request_pkg.add_argument("package_id"); request_pkg.set_defaults(func=cmd_request_package)
+    request_pkg = commands.add_parser("request", help="Ask for knowledge: a peer package (pkg:) or a Bank vault copy (asset:)")
+    request_pkg.add_argument("package_id", help="pkg:... for a peer listing, asset:... for a vault master")
+    request_pkg.add_argument("--need", default=None, help="One honest line about the gap this fills")
+    request_pkg.add_argument("--free", action="store_true", help="Plead for a free vault copy; the Bank Manager judges")
+    request_pkg.set_defaults(func=cmd_request_package)
     respond_pkg = commands.add_parser("respond-package", help="Accept or decline a package request")
     respond_pkg.add_argument("trade_id"); respond_pkg.add_argument("--decline", action="store_true")
     respond_pkg.set_defaults(func=cmd_respond_package)

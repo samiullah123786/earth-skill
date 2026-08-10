@@ -169,46 +169,18 @@ def default_skill_dirs() -> list[Path]:
     ]
 
 
-def discover_skills(dirs: list[Path]) -> list[dict]:
-    """Read installed SKILL.md files fully and retain privacy-safe evidence.
+def discover_skills(dirs: list[Path], knowledge_roots: list[Path] | None = None) -> list[dict]:
+    """Read installed skill files fully and retain privacy-safe evidence.
+
+    Delegates to the knowledge bank so genesis and `Earth scan` share one
+    walker, one denylist, and one digest rule. `knowledge_roots` are the owner's
+    explicitly consented folders, which also contribute plain markdown.
 
     Raw content is used only during local genesis. It is never written into the
     public identity or sent to AgentsEarth.
     """
-    skills_by_name: dict[str, dict] = {}
-    for root in dirs:
-        if not root.exists():
-            continue
-        for skill_md in root.rglob("SKILL.md"):
-            name = skill_md.parent.name
-            try:
-                text = skill_md.read_text(encoding="utf-8", errors="ignore")
-            except OSError:
-                continue
-            desc = ""
-            m = FRONTMATTER_RE.match(text)
-            if m:
-                dm = re.search(r"description:\s*>?\s*(.+?)(?:\n[a-zA-Z_-]+:|\n---|\Z)",
-                               m.group(1), re.DOTALL)
-                if dm:
-                    desc = " ".join(dm.group(1).split())[:400]
-            candidate = {
-                "name": name,
-                "description": desc,
-                "content": text,
-                "content_bytes": len(text.encode("utf-8")),
-                "digest": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "repository": github_repository(text) or git_remote_repository(skill_md),
-                "local_path": str(skill_md.resolve()),
-            }
-            candidate["source"] = skill_source(candidate["local_path"], candidate["repository"])
-            candidate["categories"] = skill_categories(candidate)
-            # Plugin caches often contain several copies. The longest copy is
-            # the most complete evidence and each logical skill counts once.
-            current = skills_by_name.get(name)
-            if current is None or candidate["content_bytes"] > current["content_bytes"]:
-                skills_by_name[name] = candidate
-    return list(skills_by_name.values())
+    from .knowledge import discover_knowledge
+    return discover_knowledge(dirs, knowledge_roots=knowledge_roots or [])
 
 
 def classify(skill: dict) -> str:

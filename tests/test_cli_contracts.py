@@ -176,3 +176,83 @@ def test_private_storage_restricts_directory_and_file_modes(tmp_path):
     target = write_private(root / "session.json", "{}")
     assert stat.S_IMODE(root.stat().st_mode) == 0o700
     assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+
+def _scanned_home(monkeypatch, tmp_path, notes_body="# runbook\nkubernetes deploy pipeline"):
+    """Point the CLI at an isolated home with exactly one owner knowledge root."""
+    home, notes = tmp_path / "home", tmp_path / "notes"
+    notes.mkdir(parents=True)
+    (notes / "runbook.md").write_text(notes_body, encoding="utf-8")
+    monkeypatch.setattr(cli, "HOME", home)
+    monkeypatch.setattr("earth_cli.genesis.default_skill_dirs", lambda: [])
+    return home, notes
+
+
+def test_scan_dry_run_never_opens_a_file(monkeypatch, tmp_path):
+    home, notes = _scanned_home(monkeypatch, tmp_path)
+    from earth_cli.knowledge import add_root
+    add_root(home, notes)
+    monkeypatch.setattr("builtins.input", lambda _prompt: (_ for _ in ()).throw(AssertionError("dry run must not ask")))
+    assert cli.cmd_scan(argparse.Namespace(add_root=None, remove_root=None, dry_run=True, yes=False)) == 0
+    assert not (home / "knowledge" / "index.json").exists()
+
+
+def test_scan_without_consent_reads_nothing(monkeypatch, tmp_path):
+    home, notes = _scanned_home(monkeypatch, tmp_path)
+    from earth_cli.knowledge import add_root
+    add_root(home, notes)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+    assert cli.cmd_scan(argparse.Namespace(add_root=None, remove_root=None, dry_run=False, yes=False)) == 1
+    assert not (home / "knowledge" / "index.json").exists()
+
+
+def test_scan_with_consent_writes_only_digests(monkeypatch, tmp_path):
+    home, notes = _scanned_home(monkeypatch, tmp_path, "# runbook\nSENSITIVE BODY")
+    from earth_cli.knowledge import add_root
+    add_root(home, notes)
+    assert cli.cmd_scan(argparse.Namespace(add_root=None, remove_root=None, dry_run=False, yes=True)) == 0
+    stored = (home / "knowledge" / "index.json").read_text(encoding="utf-8")
+    assert "SENSITIVE BODY" not in stored
+    assert json.loads(stored)["entry_count"] == 1
+
+
+def test_sync_refreshes_evidence_but_keeps_lived_personality(monkeypatch, tmp_path):
+    home, notes = _scanned_home(monkeypatch, tmp_path)
+    from earth_cli.knowledge import add_root
+    add_root(home, notes)
+    identity = {
+        "persona": {"name": "testa", "gender": "female"},
+        "personality": {"curiosity": 9, "warmth": 8},
+        "genome": {"skill_count": 0, "experience_tier": "emerging", "primary_category": "general"},
+        "credentials": {"public_key": "k" * 43},
+        "registration": {"agent_id": "agent:testa-1", "status": "citizen"},
+    }
+    write_private(home / "agent.json", json.dumps(identity))
+    sent = {}
+
+    class SyncClient:
+        def sync_genome(self, genome, avatar_spec):
+            sent["genome"], sent["avatar"] = genome, avatar_spec
+            return {"skillCount": genome["skill_count"], "experienceTier": genome["experience_tier"],
+                    "specialties": genome["specialties"], "tierChanged": True}
+
+    monkeypatch.setattr(cli, "_client", lambda: SyncClient())
+    assert cli.cmd_sync(argparse.Namespace()) == 0
+    refreshed = json.loads((home / "agent.json").read_text(encoding="utf-8"))
+    assert refreshed["personality"] == {"curiosity": 9, "warmth": 8}
+    assert refreshed["registration"]["agent_id"] == "agent:testa-1"
+    assert refreshed["genome"]["skill_count"] == 1
+    assert sent["genome"]["evidence_digest"] == refreshed["genome"]["evidence_digest"]
+    assert sent["avatar"]["selectionBasis"] == "verified-capabilities"
+
+
+def test_sync_without_registration_sends_nothing(monkeypatch, tmp_path):
+    home, notes = _scanned_home(monkeypatch, tmp_path)
+    from earth_cli.knowledge import add_root
+    add_root(home, notes)
+    write_private(home / "agent.json", json.dumps({
+        "persona": {"name": "testa", "gender": "female"},
+        "genome": {}, "credentials": {"public_key": "k" * 43},
+    }))
+    monkeypatch.setattr(cli, "_client", lambda: (_ for _ in ()).throw(AssertionError("must not reach Earth")))
+    assert cli.cmd_sync(argparse.Namespace()) == 0

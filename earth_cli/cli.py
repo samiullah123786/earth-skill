@@ -88,6 +88,93 @@ def cmd_genesis(args: argparse.Namespace) -> int:
     return 0
 
 
+def _scan_sources() -> tuple[list, list]:
+    from .genesis import default_skill_dirs
+    from .knowledge import root_paths
+    return default_skill_dirs(), root_paths(HOME)
+
+
+def _rescan() -> list[dict]:
+    from .knowledge import discover_knowledge
+    skill_dirs, roots = _scan_sources()
+    return discover_knowledge(skill_dirs, knowledge_roots=roots)
+
+
+def cmd_scan(args: argparse.Namespace) -> int:
+    from .knowledge import add_root, load_roots, plan_scan, remove_root, write_index
+    if args.add_root:
+        entry = add_root(HOME, args.add_root)
+        print(f"Knowledge root added: {entry['path']}")
+    if args.remove_root:
+        removed = remove_root(HOME, args.remove_root)
+        print(("Knowledge root removed: " if removed else "That folder was not a knowledge root: ") + str(args.remove_root))
+
+    skill_dirs, roots = _scan_sources()
+    plan = plan_scan(skill_dirs, knowledge_roots=roots)
+    print("Earth reads only these folders. Nothing else on this machine is opened:")
+    for folder in plan.roots:
+        print(f"  {folder}")
+    if not plan.roots:
+        print("  (none found — add one with: Earth scan --add-root <folder>)")
+    print(f"\nWould read {plan.file_count} files · {plan.total_bytes} bytes"
+          + (f" · {plan.skipped} skipped as oversized or unreadable" if plan.skipped else ""))
+    if plan.capped:
+        print(f"  STOPPED SHORT: {plan.cap_reason}")
+        print("  The counts above are therefore incomplete, not a full picture.")
+    print("  Secrets (.env, keys, credentials) are refused before any read.")
+    if args.dry_run:
+        print("\nDry run: no file was opened.")
+        return 0
+    if not args.yes:
+        answer = input("\nRead these files into this agent's private local knowledge bank? [y/N] ")
+        if answer.strip().lower() not in {"y", "yes"}:
+            print("Scan declined. Nothing was read.")
+            return 1
+
+    entries = _rescan()
+    write_index(HOME, entries)
+    from collections import Counter
+    from .genesis import classify, experience_tier
+    breadth = len(Counter(classify(entry) for entry in entries))
+    print(f"\nKnowledge bank updated: {len(entries)} entries across {breadth} capability families.")
+    print(f"  Tier from this evidence : {experience_tier(len(entries), breadth)}")
+    print(f"  Private index           : {HOME / 'knowledge' / 'index.json'}")
+    print("  Raw contents stay on this machine. Only counts, categories, and digests ever sync.")
+    print("  Next: Earth sync" if _registered() else "  Next: Earth register")
+    return 0
+
+
+def cmd_sync(_args: argparse.Namespace) -> int:
+    from .avatar_identity import derive_avatar_identity
+    from .genesis import build_identity, discover_mcp_servers
+    from .knowledge import write_index
+    identity = _identity()
+    entries = _rescan()
+    write_index(HOME, entries)
+    rebuilt = build_identity(identity.get("persona", {}), entries, discover_mcp_servers())
+    # Personality grows from lived history through Earth reflect. A re-scan
+    # refreshes evidence only; it must never overwrite what was actually lived.
+    identity["genome"] = rebuilt["genome"]
+    identity["colors"] = rebuilt["colors"]
+    identity["stage"] = rebuilt["stage"]
+    public_key = identity.get("credentials", {}).get("public_key", "")
+    identity["avatar"] = derive_avatar_identity(identity, public_key)
+    from .private_io import write_private
+    write_private(HOME / "agent.json", json.dumps(identity, indent=2))
+
+    genome = identity["genome"]
+    print(f"Local evidence refreshed: {genome['skill_count']} skills · {genome['primary_category']} · {genome['experience_tier']}")
+    if not _registered():
+        print("Not registered yet, so nothing was sent. Run Earth register to join Earth.")
+        return 0
+    result = _client().sync_genome(genome, identity["avatar"])
+    print(f"Earth updated this citizen: {result['skillCount']} evidenced skills · {result['experienceTier']}")
+    print(f"  Specialties : {', '.join(result.get('specialties', [])) or 'none yet'}")
+    if result.get("tierChanged"):
+        print("  The citizen's insignia deepened on the live map — everyone can see the growth.")
+    return 0
+
+
 def cmd_register(args: argparse.Namespace) -> int:
     result = _client().register(args.owner_name)
     print(("Citizen reserved: " if result["status"] == "pending_owner" else "Fresh owner link issued for: ") + result["agentId"])
@@ -888,6 +975,14 @@ def main(argv: list[str] | None = None) -> int:
     genesis.add_argument("--out", default=None)
     genesis.add_argument("--accept-charter", action="store_true")
     genesis.set_defaults(func=cmd_genesis)
+
+    scan = commands.add_parser("scan", help="Show, consent to, and read this machine's knowledge folders")
+    scan.add_argument("--add-root", default=None, help="Add one folder of owner knowledge to scan")
+    scan.add_argument("--remove-root", default=None, help="Stop scanning a folder")
+    scan.add_argument("--dry-run", action="store_true", help="List what would be read without opening a file")
+    scan.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
+    scan.set_defaults(func=cmd_scan)
+    commands.add_parser("sync", help="Re-scan local evidence and update this citizen on Earth").set_defaults(func=cmd_sync)
 
     commands.add_parser("status", help="Show private local identity and registration state").set_defaults(func=cmd_status)
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")

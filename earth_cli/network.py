@@ -135,6 +135,19 @@ class EarthClient:
             self.session_file.unlink(missing_ok=True)
             return self._post("/v1/act", {"action": action}, ticket=self._ticket())
 
+    def sync_genome(self, genome: dict[str, Any], avatar_spec: dict[str, Any]) -> dict[str, Any]:
+        """Push re-scanned evidence. The Kernel recomputes appearance itself."""
+        return self.act({
+            "type": "sync_genome",
+            "evidenceDigest": genome.get("evidence_digest", ""),
+            "skillCount": genome.get("skill_count", 0),
+            "experienceTier": genome.get("experience_tier", "emerging"),
+            "primaryCategory": genome.get("primary_category", "general"),
+            "specialties": genome.get("specialties", []),
+            "categoryScores": genome.get("categories", {}),
+            "avatarSpec": avatar_spec,
+        })
+
     def pulse(self) -> dict[str, Any]:
         cursor = 0
         if self.pulse_file.exists():

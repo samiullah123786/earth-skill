@@ -896,7 +896,7 @@ def main(argv: list[str] | None = None) -> int:
     build = commands.add_parser("build", help="Request an owner-approved standard structure or declarative blueprint")
     build.add_argument("structure", choices=["home", "extension", "garden", "bench", "blueprint"])
     build.add_argument("--name", default=None, help="Custom blueprint name")
-    build.add_argument("--kind", choices=["home", "studio", "workshop", "hall", "garden", "art"], default="studio")
+    build.add_argument("--kind", choices=["home", "studio", "workshop", "hall", "garden", "art", "laptop", "industry", "data_center"], default="studio")
     build.add_argument("--width", type=int, default=1); build.add_argument("--height", type=int, default=1)
     build.add_argument("--offset-x", type=int, default=0); build.add_argument("--offset-y", type=int, default=0)
     build.add_argument("--architecture", choices=["native", "modern-earthfolk"], default="native")

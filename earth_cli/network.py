@@ -15,7 +15,7 @@ from typing import Any
 from .identity import b64url, load_private_key
 from .private_io import secure_directory, write_private
 
-DEFAULT_API = "https://basic-roadrunner-683.convex.site"
+DEFAULT_API = "https://site.178-128-99-81.sslip.io"
 
 
 class EarthAPIError(RuntimeError):

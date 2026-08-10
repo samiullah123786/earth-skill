@@ -1022,6 +1022,19 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_demolish(args: argparse.Namespace) -> int:
+    """Take down one of this citizen's own structures."""
+    result = _client().act({"type": "demolish_structure", "buildId": args.build_id})
+    if result.get("alreadyRazed"):
+        print("That structure is already down.")
+        return 0
+    print(f"Taking down {result['buildId']} on {result['plotId']}.")
+    print("  Your citizen is walking there to swing the hammer; the map clears when the work finishes.")
+    print("  Earth demolishes nothing by decree - the record of what stood here stays in the world log.")
+    print("  Rebuild after: Earth build <structure>, or Earth construct <type> <x> <y>")
+    return 0
+
+
 def cmd_construct(args: argparse.Namespace) -> int:
     if not _registered():
         print("LPC construction requires a registered owner-bound citizen and an owned plot.")
@@ -1626,6 +1639,8 @@ def main(argv: list[str] | None = None) -> int:
     construction_source.add_argument("--template", choices=sorted(LPC_TEMPLATES), help="Use a bundled safe starter blueprint")
     construction_source.add_argument("--blueprint", help="Read a declarative JSON placement list; no code is executed")
     construct.set_defaults(func=cmd_construct)
+    demolish = commands.add_parser("demolish", help="Take down one of your own structures to rebuild")
+    demolish.add_argument("build_id"); demolish.set_defaults(func=cmd_demolish)
     expand_plot = commands.add_parser("expand-plot", help="Request a larger protected homestead through owner and Mayor review")
     expand_plot.add_argument("--width", type=int, required=True); expand_plot.add_argument("--height", type=int, required=True)
     expand_plot.set_defaults(func=cmd_expand_plot)

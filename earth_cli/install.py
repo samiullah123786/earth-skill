@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import shutil
+import re
 import tarfile
 import time
 from pathlib import Path
@@ -54,16 +55,22 @@ def pack_skill(source: str | Path) -> dict:
         raise ValueError("that folder holds nothing publishable")
 
     buffer = io.BytesIO()
-    # mtime is fixed and gzip carries no timestamp, so the same folder always
-    # produces the same bytes and therefore the same digest.
-    with tarfile.open(fileobj=buffer, mode="w:gz", format=tarfile.PAX_FORMAT, compresslevel=9) as archive:
-        archive.gzip = False  # type: ignore[attr-defined]
+    # Determinism is load-bearing: the Bank deduplicates by this digest, so the
+    # same folder must pack to the same bytes on any machine, on any day. Tar
+    # member metadata is pinned below, and gzip is driven directly with mtime=0
+    # because tarfile's "w:gz" quietly stamps the current time into the gzip
+    # header - four bytes of wall clock that changed every digest until it was
+    # caught by packing the same folder twice, two seconds apart.
+    import gzip as gzip_module
+    gz = gzip_module.GzipFile(fileobj=buffer, mode="wb", compresslevel=9, mtime=0)
+    with tarfile.open(fileobj=gz, mode="w", format=tarfile.PAX_FORMAT) as archive:
         for path in members:
             info = archive.gettarinfo(str(path), arcname=path.relative_to(root).as_posix())
             info.mtime, info.uid, info.gid, info.uname, info.gname = 0, 0, 0, "", ""
             info.mode = 0o644
             with path.open("rb") as handle:
                 archive.addfile(info, handle)
+    gz.close()
     payload = buffer.getvalue()
     if len(payload) > MAX_PACKAGE_BYTES:
         raise ValueError(f"packed to {len(payload)} bytes, above the {MAX_PACKAGE_BYTES} byte cap; "
@@ -248,3 +255,28 @@ def _record(home: str | Path, record: dict) -> None:
                           if not (row["name"] == record["name"] and row.get("state") == record.get("state"))]
                          + [record])[-200:]
     write_private(_index_file(home), json.dumps(index, indent=2))
+
+
+FRONTMATTER = re.compile(r"^---\s*\n.*?\n---\s*\n", re.DOTALL)
+
+
+def normalized_content_digest(source: str | Path) -> str:
+    """Identity of a skill's words rather than its bytes.
+
+    Strips markdown frontmatter and folds every whitespace run, so a copy that
+    differs only in metadata, line endings, or indentation deduplicates against
+    the original in the Bank instead of banking twice.
+    """
+    root = Path(source).resolve()
+    members = sorted(
+        path for path in root.rglob("*")
+        if path.is_file() and not path.is_symlink() and path.suffix.lower() in PACKABLE_SUFFIXES
+    )
+    parts: list[str] = []
+    for path in members:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if path.suffix.lower() in {".md", ".markdown"}:
+            text = FRONTMATTER.sub("", text, count=1)
+        folded = " ".join(text.split())
+        parts.append(path.relative_to(root).as_posix() + "\x01" + folded)
+    return hashlib.sha256("\x00".join(parts).encode("utf-8")).hexdigest()

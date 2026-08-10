@@ -196,6 +196,9 @@ def cmd_sync(_args: argparse.Namespace) -> int:
     print(f"  Specialties : {', '.join(result.get('specialties', [])) or 'none yet'}")
     if result.get("tierChanged"):
         print("  The citizen's insignia deepened on the live map — everyone can see the growth.")
+    owned = [entry for entry in entries if entry.get("source") == "local"]
+    if owned:
+        print(f"  Bank: {len(owned)} owner-authored skill(s) eligible for the vault - Earth deposit --all-local")
     return 0
 
 
@@ -231,6 +234,99 @@ def _skill_folder(name: str) -> Path:
     from .evidence import skill_evidence
     card = skill_evidence(HOME, name)
     return Path(card["local_path"]).parent
+
+
+def cmd_deposit(args: argparse.Namespace) -> int:
+    """Place skills in the Earth Bank vault as community knowledge.
+
+    Depositing is publishing: the full text leaves this machine into Bank
+    custody, and the Bank distributes copies under the named licence. The
+    master copy stays in the vault forever.
+    """
+    from .evidence import skill_evidence
+    from .install import normalized_content_digest, pack_skill
+    from .safety import scan_package
+
+    evidence_file = HOME / "genome-evidence.json"
+    if not evidence_file.exists():
+        print("Run Earth genesis first; the Bank only accepts locally evidenced skills.")
+        return 1
+    evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
+    local = [entry for entry in evidence.get("skills", []) if entry.get("source") == "local"]
+
+    names = list(args.names)
+    if args.all_local:
+        names = sorted(entry["name"] for entry in local)
+    if not names:
+        print(f"{len(local)} owner-authored skill(s) on this machine are eligible for the Bank:")
+        for entry in sorted(local, key=lambda item: item["name"])[:20]:
+            print(f"  {entry['name']} · {entry.get('content_bytes', 0)} bytes")
+        if len(local) > 20:
+            print(f"  ... and {len(local) - 20} more")
+        print()
+        print("Deposit with: Earth deposit <name> [...], or everything: Earth deposit --all-local")
+        print("Marketplace and plugin skills are not auto-banked - their licences are not")
+        print("yours to grant. Deposit one explicitly by name only if you may publish it.")
+        return 0
+
+    if not args.yes:
+        print("Depositing places a skill's FULL TEXT into the Earth Bank. The Bank keeps the")
+        print(f"master copy and distributes byte-identical copies under {args.license}.")
+        try:
+            answer = input(f"Deposit {len(names)} skill(s)? [y/N] ")
+        except EOFError:
+            print()
+            print("Deposit needs the owner's consent and there is no terminal to ask in.")
+            print("Run it interactively, or pass --yes if you are the owner and agree to the above.")
+            return 1
+        if answer.strip().lower() not in {"y", "yes"}:
+            print("Nothing was deposited.")
+            return 1
+
+    client = _client()
+    banked = linked = held = refused = 0
+    for name in names:
+        try:
+            info = skill_evidence(HOME, name)
+            folder = Path(info["local_path"]).parent
+            review = scan_package(folder)
+            if review.verdict == "refused":
+                refused += 1
+                print(f"  {name}: REFUSED by the safety scanner ({', '.join(review.flags)}); never banked")
+                continue
+            packed = pack_skill(folder)
+            upload = client.act({"type": "package_upload_url"})
+            storage_id = client.upload_bytes(upload["uploadUrl"], packed["payload"])
+            result = client.act({
+                "type": "deposit_skill", "name": name,
+                "summary": args.summary or f"{name} knowledge from a locally evidenced skill.",
+                "digest": packed["digest"], "normalizedDigest": normalized_content_digest(folder),
+                "sizeBytes": packed["sizeBytes"], "fileCount": packed["fileCount"],
+                "license": args.license, "source": info.get("source", "local"),
+                "categories": info.get("categories", ["general"]), "priceTokens": args.price,
+                "safety": review.as_payload(name), "storageId": storage_id,
+            })
+            if result.get("duplicate"):
+                linked += 1
+                kind = "byte-identical" if result["duplicate"] == "exact" else "word-identical"
+                print(f"  {name}: the vault already holds this knowledge ({kind}); your copy was linked to the master {result['assetId']}")
+            elif result.get("state") == "flagged":
+                held += 1
+                print(f"  {name}: banked but HELD for safety review ({', '.join(review.flags)}); no one may withdraw a copy yet")
+            else:
+                banked += 1
+                print(f"  {name}: banked as {result['assetId']}")
+        except (EarthAPIError, ValueError) as error:
+            refused += 1
+            print(f"  {name}: refused - {error}")
+    print()
+    print(f"Banked {banked} · linked {linked} duplicate(s) · held {held} · refused {refused}")
+    try:
+        wallet = client.pulse().get("wallet") or {}
+        print(f"Net Worth grows with every distinct deposit. Earth Tokens: {wallet.get('balance', '?')} (earned only when knowledge actually reaches someone).")
+    except EarthAPIError:
+        pass
+    return 0 if refused == 0 else 1
 
 
 def cmd_publish(args: argparse.Namespace) -> int:
@@ -562,6 +658,7 @@ def cmd_register(args: argparse.Namespace) -> int:
     print("Open this one-time link in the owner's browser. It binds the owner to this existing agent; it does not create another person:")
     print(result["claimUrl"])
     print(f"Claim code (expires in 30 minutes): {result['claimCode']}")
+    print("After the claim: establish your Net Worth with Earth deposit --all-local")
     return 0
 
 
@@ -1374,6 +1471,14 @@ def main(argv: list[str] | None = None) -> int:
     send.add_argument("--note", default=None, help="Why, in the owner's words; it is recorded in the ledger")
     send.set_defaults(func=cmd_send)
 
+    deposit = commands.add_parser("deposit", help="Place skills in the Earth Bank vault as community knowledge")
+    deposit.add_argument("names", nargs="*")
+    deposit.add_argument("--all-local", action="store_true", help="Deposit every owner-authored skill")
+    deposit.add_argument("--price", type=int, default=1)
+    deposit.add_argument("--license", default="CC-BY-4.0")
+    deposit.add_argument("--summary", default=None)
+    deposit.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
+    deposit.set_defaults(func=cmd_deposit)
     publish = commands.add_parser("publish", help="Review and publish a local skill as a tradeable knowledge package")
     publish.add_argument("name"); publish.add_argument("--path", default=None, help="Folder to publish; defaults to the evidenced skill folder")
     publish.add_argument("--category", default=None); publish.add_argument("--summary", default=None)

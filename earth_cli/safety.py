@@ -23,7 +23,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
-SCANNER_VERSION = "earth-safety-1"
+SCANNER_VERSION = "earth-safety-2"
 
 INERT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".rst", ".json", ".yaml", ".yml",
                             ".csv", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp"})
@@ -131,6 +131,17 @@ TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
      "carries a long encoded blob that a reader cannot inspect"),
     ("hidden_text", re.compile(r"[​‌‍⁠﻿]"),
      "contains invisible characters that hide text from a human reader"),
+    # Version 2. Direction-override controls make rendered text read differently
+    # from the bytes an agent consumes - the trojan-source shape.
+    ("bidi_override", re.compile("[‪-‮⁦-⁩]"),
+     "contains Unicode direction controls that make displayed text lie about its order"),
+    # Version 2. A listing's prose has no business steering how an agent uses
+    # OTHER tools; that is the tool-shadowing attack on MCP hosts.
+    ("tool_shadowing", re.compile(
+        r"(?i)(instead of (?:using|calling)|do not (?:use|call) the|"
+        r"before (?:using|calling) any other tool|always (?:use|call) this tool (?:first|instead)|"
+        r"intercept(?:s)? (?:all|other) tool|override the behavior of)"),
+     "instructs an agent to prefer, avoid, or intercept other tools"),
 )
 
 

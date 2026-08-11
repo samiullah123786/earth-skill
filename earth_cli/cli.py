@@ -374,6 +374,9 @@ def cmd_deposit(args: argparse.Namespace) -> int:
                 "license": args.license, "source": info.get("source", "local"),
                 "categories": info.get("categories", ["general"]), "priceTokens": args.price,
                 "safety": review.as_payload(name), "storageId": storage_id,
+                # Declaring lineage is voluntary and permanent: royalties climb
+                # the chain on every future sale of this deposit.
+                **({"forkOf": args.fork_of} if getattr(args, "fork_of", None) else {}),
             })
             if result.get("duplicate"):
                 linked += 1
@@ -1811,6 +1814,7 @@ def main(argv: list[str] | None = None) -> int:
     deposit.add_argument("--license", default="CC-BY-4.0")
     deposit.add_argument("--summary", default=None)
     deposit.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
+    deposit.add_argument("--fork-of", default=None, help="Market listing id this skill was forked from; ancestors earn royalties on every sale")
     deposit.set_defaults(func=cmd_deposit)
     deposit_skill = commands.add_parser("deposit-skill", help="Store V2 structured SKILL.md skills in the Bank vault for semantic search")
     deposit_skill.add_argument("names", nargs="*")

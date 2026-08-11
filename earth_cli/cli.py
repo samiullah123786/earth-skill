@@ -239,25 +239,64 @@ LEDGER_WORDS = {
 }
 
 
-def cmd_wallet(_args: argparse.Namespace) -> int:
-    # Reads without acknowledging: the pulse cursor only advances through the
-    # normal Earth pulse, so checking a balance never consumes waiting mail.
+def cmd_wallet(args: argparse.Namespace) -> int:
+    """A statement, not a running total.
+
+    Every line says what moved, who it moved with, what it was FOR, and where
+    the wallet stood afterwards. Money the Bank owes but has not paid is listed
+    separately - it is not a balance, but it is not nothing either.
+    """
+    # Read through the pulse, which does NOT acknowledge: the cursor only
+    # advances through a real Earth pulse, so checking a balance can never
+    # consume a letter that was waiting to be read.
     wallet = _client().pulse().get("wallet") or {}
     balance = wallet.get("balance", 0)
-    print(f"Earth Tokens: {balance}")
-    print("Earned only by giving verified knowledge to other citizens. No citizen can mint.")
-    history = wallet.get("history") or []
-    if not history:
-        print("No movements yet. Share a verified skill with Earth share-skill to earn your first token.")
+    totals = wallet.get("totals") or {}
+    pending = wallet.get("pending") or []
+
+    print(f"Earth Tokens: {balance:,}")
+    if totals:
+        print(f"  earned {totals.get('earned', 0):,} \u00b7 spent {totals.get('spent', 0):,} "
+              f"\u00b7 net {totals.get('net', 0):+,} across the movements below")
+    if pending:
+        owed = wallet.get("pendingTotal", 0)
+        print(f"  PENDING {owed:,} owed to you by the Earth Bank:")
+        for claim in pending:
+            print(f"    {claim['amount']:,} - {claim['reason']}")
+
+    entries = wallet.get("entries") or wallet.get("history") or []
+    if not entries:
+        print("  No movements yet. Tokens arrive when knowledge reaches somebody.")
         return 0
-    print("\nRecent movements:")
-    for entry in history[:10]:
-        amount = entry.get("amount", 0)
-        stamp = dt.datetime.fromtimestamp(entry.get("createdAt", 0) / 1000).strftime("%Y-%m-%d %H:%M")
-        print(f"  {amount:+d}  {LEDGER_WORDS.get(entry.get('kind'), entry.get('kind', 'movement'))}"
-              f" · {stamp} · {entry.get('reason', '')}")
+
+    print("\n  WHEN              CHANGE      BALANCE  WHAT")
+    for row in entries[: int(getattr(args, "limit", 25) or 25)]:
+        when = _format_time(row.get("createdAt"))
+        change = f"{row['amount']:+,}"
+        after = f"{row.get('balanceAfter', 0):,}"
+        subject = row.get("subject") or {}
+        # The skill, plot or person this was about - the whole point of a
+        # statement is that a line explains itself without a lookup.
+        what = subject.get("name") or row.get("kind", "").replace("_", " ")
+        who = row.get("counterparty")
+        line = f"  {when:<17} {change:>9}  {after:>9}  {what}"
+        if who:
+            line += f"  ({'to' if row['direction'] == 'out' else 'from'} {who})"
+        print(line)
+        note = subject.get("note")
+        if note:
+            print(f"  {'':<17} {'':>9}  {'':>9}  \u2514 {note}")
+    if len(entries) > int(getattr(args, "limit", 25) or 25):
+        print(f"  ...{len(entries) - int(getattr(args, 'limit', 25) or 25)} older movements not shown")
     return 0
 
+
+def _format_time(value: object) -> str:
+    try:
+        import datetime
+        return datetime.datetime.fromtimestamp(int(value) / 1000).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return "-"
 
 def _skill_folder(name: str) -> Path:
     """Find a locally evidenced skill's folder from the genesis evidence."""
@@ -1751,7 +1790,9 @@ def main(argv: list[str] | None = None) -> int:
     doctor.add_argument("--repair", action="store_true", help="Rejoin the configured Kernel with the existing keypair")
     doctor.set_defaults(func=cmd_doctor)
     commands.add_parser("sync", help="Re-scan local evidence and update this citizen on Earth").set_defaults(func=cmd_sync)
-    commands.add_parser("wallet", help="Show this citizen's Earth Token balance and ledger").set_defaults(func=cmd_wallet)
+    wallet_cmd = commands.add_parser("wallet", help="A full Earth Token statement: what moved, with whom, and what for")
+    wallet_cmd.add_argument("--limit", type=int, default=25, help="How many movements to print")
+    wallet_cmd.set_defaults(func=cmd_wallet)
     send = commands.add_parser("send", help="Send Earth Tokens to another citizen")
     send.add_argument("agent_id"); send.add_argument("amount", type=int)
     send.add_argument("--note", default=None, help="Why, in the owner's words; it is recorded in the ledger")

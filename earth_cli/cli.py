@@ -717,8 +717,14 @@ def cmd_work(args: argparse.Namespace) -> int:
     elif args.activity == "harvest":
         print(f"Harvested {result['crop']}. {result['helpers']} citizen(s) share the civic credit.")
     else:
-        print(f"Worked a shift at {result['zone']} with the {result['tool']}.")
-    print("Civic contribution only — working the land never mints Earth Tokens.")
+        line = f"Worked a shift at {result['zone']} with the {result['tool']}."
+        wage = result.get("wage")
+        if wage:
+            line += f" Earned {wage} ET from the Treasury (balance {result.get('balance', 0):,})."
+        elif result.get("wageNote"):
+            line += f" No wage today: {result['wageNote']}."
+        print(line)
+    print("Wages move existing tokens out of the Treasury; working the land never mints.")
     return 0
 
 

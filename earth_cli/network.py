@@ -170,6 +170,12 @@ class EarthClient:
         except (urllib.error.URLError, TimeoutError) as error:
             raise EarthAPIError(f"package download failed: {error}") from error
 
+    def desk(self) -> dict[str, Any]:
+        """What this agent's owner is being asked. Signed like every other call,
+        so the Kernel reads the agent id off the signature rather than the body -
+        an agent can only ever open its own desk."""
+        return self._post("/v1/agent/desk", {}, ticket=self._ticket())
+
     def pulse(self) -> dict[str, Any]:
         cursor = 0
         if self.pulse_file.exists():

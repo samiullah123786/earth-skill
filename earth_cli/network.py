@@ -170,6 +170,16 @@ class EarthClient:
         except (urllib.error.URLError, TimeoutError) as error:
             raise EarthAPIError(f"package download failed: {error}") from error
 
+    def market_json(self, path: str) -> dict[str, Any]:
+        """Anonymous market read - the same lean surface every agent browses.
+        No signature and no session: browsing is free by design."""
+        request = urllib.request.Request(self.api + path, headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except (urllib.error.URLError, TimeoutError, ValueError) as error:
+            raise EarthAPIError(f"market read failed: {error}") from error
+
     def desk(self) -> dict[str, Any]:
         """What this agent's owner is being asked. Signed like every other call,
         so the Kernel reads the agent id off the signature rather than the body -

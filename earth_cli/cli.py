@@ -1536,6 +1536,163 @@ def cmd_live(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_push(args: argparse.Namespace) -> int:
+    """Stage a folder, scan it, and put it on the market in one motion.
+
+    The manual route is four commands and two mistakes waiting to happen:
+    copy the folder into the agent's skills, consent the root, rescan, then
+    deposit. Push is those four in order, stopping loudly at the first refusal.
+    """
+    import shutil
+    from .knowledge import add_root
+
+    source = Path(args.path).expanduser().resolve()
+    if not source.is_dir():
+        print(f"{source} is not a folder.")
+        return 1
+    if not any((source / candidate).is_file() for candidate in ("SKILL.md", "skills.md")):
+        print(f"{source} has no SKILL.md; a listing must describe itself before it can be sold.")
+        return 1
+    name = args.name or source.name.lower().replace("_", "-")
+    if not __import__("re").fullmatch(r"[a-z0-9][a-z0-9 _.+-]{1,63}", name):
+        print(f"'{name}' is not a valid listing name (2-64 plain characters).")
+        return 1
+
+    # Stage into the agent's own skills so the evidence pipeline sees it.
+    staged = HOME / "skills" / name
+    if staged.resolve() != source:
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        if staged.exists():
+            shutil.rmtree(staged)
+        shutil.copytree(source, staged)
+    try:
+        add_root(HOME, HOME / "skills")
+    except ValueError:
+        pass  # already consented, or the folder needs no re-consent
+    entries = _rescan()
+    _refresh_evidence(entries)
+    print(f"Staged {name} and refreshed the evidence ({len(entries)} entries).")
+
+    deposit_args = argparse.Namespace(
+        names=[name], all_local=False, price=args.price, license=args.license,
+        summary=args.summary, yes=True, fork_of=args.fork_of,
+    )
+    return cmd_deposit(deposit_args)
+
+
+def cmd_pull(args: argparse.Namespace) -> int:
+    """Resolve a name on the market, buy it, verify it, and install it.
+
+    Nothing is written to disk until two proofs hold: the downloaded bytes
+    hash to the digest the market advertised, and - when the listing wears the
+    badge - the Kernel's Ed25519 signature over that digest verifies against
+    the key published at /v1/verify. A market that skips its own checks at
+    install time was never a market about provenance.
+    """
+    import base64
+    import hashlib
+    from .install import install_package
+
+    client = _client()
+    wanted = args.name.strip().lower()
+
+    listings = client.market_json("/v1/market?limit=50").get("listings", [])
+    matches = [row for row in listings if str(row.get("name", "")).lower() == wanted]
+    if not matches:
+        near = [row["name"] for row in listings if wanted in str(row.get("name", "")).lower()][:5]
+        print(f"Nothing on the market is named '{args.name}'."
+              + (f" Near matches: {', '.join(near)}" if near else ""))
+        return 1
+    # Verified first, then the most adopted: the market's own trust order.
+    matches.sort(key=lambda row: (not row.get("verified"), -row.get("rank", 0)))
+    listing = matches[0]
+    detail = client.market_json(f"/v1/market/{listing['id']}")
+    print(f"{listing['name']} · {listing['id']}")
+    print(f"  {'EARTH VERIFIED' if listing.get('verified') else 'UNVERIFIED - no Kernel signature'}"
+          f" · {listing.get('price', 0)} ET · {listing.get('pulls', 0)} pull(s)")
+
+    # Acquire. The Kernel decides the path: counter, in-person, or a re-fetch
+    # of something already owned.
+    action_type = "request_asset" if listing["id"].startswith("asset:") else "request_package"
+    key_name = "assetId" if action_type == "request_asset" else "packageId"
+    result = client.act({"type": action_type, key_name: listing["id"]})
+    mode = result.get("mode") or result.get("state")
+    trade_id = result.get("tradeId")
+    if mode == "counter_routed":
+        print("Walking to the Earth Bank counter first. Run this again on arrival.")
+        return 0
+    if mode == "live_trade":
+        print("The author is awake, so this trade happens in person. Walk over and ask, or try again when they sleep.")
+        return 0
+    if mode == "free_pending":
+        print("Your free-grant plea is with the Bank Manager. You will hear back.")
+        return 0
+    if not trade_id:
+        print(f"The Kernel answered '{mode}' without a trade; nothing to fetch.")
+        return 1
+    if mode == "already_withdrawn":
+        print("Already yours; fetching the copy you are owed.")
+
+    delivery = client.act({"type": "fetch_package", "tradeId": trade_id})
+    if not delivery.get("downloadUrl"):
+        print(f"{delivery.get('name', listing['name'])} ships as a verified repository root:")
+        print(f"  {delivery.get('repoUrl')}")
+        print("  Review it yourself. Earth installs nothing it did not carry.")
+        return 0
+    payload = client.download_bytes(delivery["downloadUrl"])
+
+    # Proof one: the bytes are the bytes the market advertised.
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != str(listing.get("digest", "")).lower():
+        print("REFUSED: the downloaded bytes do not match the market's digest. Nothing was written.")
+        return 1
+    print(f"  digest verified: {actual[:16]}…")
+
+    # Proof two: the badge is real. Only listings wearing one are held to it.
+    verified = detail.get("earthVerified")
+    scanner = detail.get("scanner") or {}
+    if verified:
+        try:
+            from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+            info = client.market_json("/v1/verify")
+            def _b64u(value: str) -> bytes:
+                return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+            message = (f"earth-verified-v1\n{detail['digest']}\n{scanner.get('verdict')}"
+                       f"\n{scanner.get('scannerVersion')}\n{verified['signedAt']}").encode()
+            Ed25519PublicKey.from_public_bytes(_b64u(info["publicKey"])).verify(
+                _b64u(verified["signature"]), message)
+            print("  Earth Verified signature checked against the published key.")
+        except Exception:
+            print("REFUSED: this listing claims Earth Verified but its signature does not verify. Nothing was written.")
+            return 1
+    else:
+        print("  no badge: installing on the local scanner's judgment alone.")
+
+    policy = _identity().get("persona", {}).get("skill_policy", "safe_auto")
+    record = install_package(HOME, delivery.get("name", listing["name"]), payload,
+                             declared_digest=delivery.get("digest", actual), policy=policy,
+                             provider=str(detail.get("author", {}).get("agentId", "")), trade_id=trade_id)
+    state = record.get("state")
+    if state == "pending_owner":
+        # Not a failure and not yet an install: the bytes are verified and held.
+        # The trade stays 'delivered' until the owner decides, so the verified-
+        # install signal only ever reflects packages that actually run.
+        print(f"Held for the owner's review: {record.get('note', '')}")
+        print(f"Approve with: Earth approve-skill {record.get('name', listing['name'])}")
+        return 0
+    outcome = "installed" if state == "installed" else "failed"
+    try:
+        client.act({"type": "confirm_install", "tradeId": trade_id, "outcome": outcome,
+                    "note": record.get("note", "")[:200] or f"{outcome} via Earth pull"})
+    except EarthAPIError:
+        pass  # an already-confirmed historical trade is fine; the install stands
+    if outcome == "installed":
+        print(f"Installed into {record.get('path', HOME / 'skills')}. The author was paid; the pull was counted.")
+    else:
+        print(f"REFUSED by the local scanner and not installed: {record.get('note', '')}")
+    return 0
+
+
 def cmd_desk(_args: argparse.Namespace) -> int:
     """What this agent's own owner is being asked, in one signed read.
 
@@ -1816,6 +1973,17 @@ def main(argv: list[str] | None = None) -> int:
     deposit.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
     deposit.add_argument("--fork-of", default=None, help="Market listing id this skill was forked from; ancestors earn royalties on every sale")
     deposit.set_defaults(func=cmd_deposit)
+    push = commands.add_parser("push", help="Stage a folder, scan it, and list it on the Earth Market in one motion")
+    push.add_argument("path", help="Folder containing a SKILL.md")
+    push.add_argument("--name", default=None, help="Listing name (defaults to the folder name)")
+    push.add_argument("--price", type=int, default=0)
+    push.add_argument("--license", default="CC-BY-4.0")
+    push.add_argument("--summary", default=None)
+    push.add_argument("--fork-of", default=None, help="Market listing id this was forked from; ancestors earn royalties")
+    push.set_defaults(func=cmd_push)
+    pull = commands.add_parser("pull", help="Buy a listing by name, verify digest and Kernel signature, and install it")
+    pull.add_argument("name", help="The listing's name as shown on the market")
+    pull.set_defaults(func=cmd_pull)
     deposit_skill = commands.add_parser("deposit-skill", help="Store V2 structured SKILL.md skills in the Bank vault for semantic search")
     deposit_skill.add_argument("names", nargs="*")
     deposit_skill.add_argument("--all-local", action="store_true")

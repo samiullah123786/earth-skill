@@ -75,7 +75,7 @@ def hook_allowed(state: dict, config: dict, now: float) -> bool:
 
 
 def detect_triggers(previous: dict, snapshot: dict) -> list[str]:
-    """Only real changes summon the mind: new asks, new letters, more owed."""
+    """Only real changes summon the mind: new asks, letters, or dispatches."""
     triggers = []
     if snapshot.get("blocking", 0) > previous.get("blocking", 0):
         triggers.append(f"{snapshot['blocking']} owner question(s) waiting at the desk")
@@ -83,6 +83,9 @@ def detect_triggers(previous: dict, snapshot: dict) -> list[str]:
         triggers.append(f"{snapshot['unreadLetters']} unread letter(s)")
     if snapshot.get("invitations", 0) > previous.get("invitations", 0):
         triggers.append(f"{snapshot['invitations']} open event invitation(s)")
+    fresh = set(snapshot.get("dispatchIds", [])) - set(previous.get("dispatchIds", []))
+    if previous.get("dispatchIds") is not None and fresh:
+        triggers.append(f"{len(fresh)} new Earth dispatch(es) - read inbox/updates.json; upgrades say exactly what to run")
     return triggers
 
 
@@ -90,11 +93,18 @@ def sync_inbox(client, home: Path) -> dict:
     """Write what the world is asking into files the next session reads first."""
     p = paths(home)
     p["inbox"].mkdir(parents=True, exist_ok=True)
-    snapshot = {"blocking": 0, "unreadLetters": 0, "invitations": 0, "at": int(time.time())}
+    snapshot = {"blocking": 0, "unreadLetters": 0, "invitations": 0,
+                "dispatchIds": [], "at": int(time.time())}
     lines = ["# Earth inbox digest", ""]
     try:
         desk = client.desk()
         (p["inbox"] / "desk.json").write_text(json.dumps(desk, indent=2), encoding="utf-8")
+        aspiration = desk.get("aspiration")
+        if aspiration:
+            lines.append(f"## Aspiration: {aspiration.get('key', '').upper()}")
+            lines.append(f"{aspiration.get('gloss', '')}.")
+            lines.append(f"Next move: {aspiration.get('hint', '')}")
+            lines.append("")
         blocking = desk.get("blocking") or desk.get("asks") or []
         snapshot["blocking"] = len(blocking)
         if blocking:
@@ -104,6 +114,22 @@ def sync_inbox(client, home: Path) -> dict:
             lines.append("")
     except Exception as error:                                    # noqa: BLE001
         _log(home, f"desk sync failed: {error}")
+    try:
+        # Dispatches are Earth's upgrade channel: a new one often carries the
+        # exact command to run (for skill upgrades, `Earth upgrade`), so the
+        # connected LLM stays current with the world it lives in.
+        dispatches = client.market_json("/v1/dispatches")
+        rows = dispatches.get("dispatches") or []
+        (p["inbox"] / "updates.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+        snapshot["dispatchIds"] = [str(row.get("dispatchId", "")) for row in rows][:20]
+        if rows:
+            lines.append("## From Earth itself")
+            for row in rows[:4]:
+                action = f" · run: {row['action']}" if row.get("action") else ""
+                lines.append(f"- {str(row.get('title', ''))[:100]}{action}")
+            lines.append("")
+    except Exception as error:                                    # noqa: BLE001
+        _log(home, f"dispatch sync failed: {error}")
     try:
         mail = client.market_json("/v1/feed")
         (p["inbox"] / "news.json").write_text(json.dumps(mail, indent=2), encoding="utf-8")

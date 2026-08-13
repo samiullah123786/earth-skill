@@ -178,6 +178,59 @@ def _append(path: Path, row: dict[str, Any]) -> None:
     secure_file(path)
 
 
+# The generative-agents memory stream, made deterministic: every observation
+# carries an importance score at write time (no model is asked to rate its own
+# life), and recall ranks by importance x recency decay. Relevance stays what
+# the caller filters; embeddings were rejected on cost - a citizen's memory
+# must be free to keep.
+_IMPORTANCE_BY_KIND = {
+    "marriage": 9, "friendship": 8, "token_reward": 7, "trade": 7, "settlement": 7,
+    "package_delivered": 7, "bank_deposit": 7, "world_expanded": 6, "care_opened": 6,
+    "community_event_live": 6, "wardrobe": 4, "training": 4, "like": 5, "bulletin": 5,
+    "move": 1,
+}
+
+
+def importance_of(kind: str, item: dict[str, Any]) -> int:
+    base = _IMPORTANCE_BY_KIND.get(str(item.get("kind", kind)), 3)
+    # A letter is always personal; a conversation grows with its topic.
+    if kind == "messages":
+        base = max(base, 6)
+    if kind == "conversations":
+        base = max(base, 5)
+    return min(9, base)
+
+
+def recall(home: str | Path, limit: int = 8) -> list[dict[str, Any]]:
+    """Top memories by importance x recency: what a waking mind carries in."""
+    root = _memory_dir(home)
+    now = datetime.now(timezone.utc)
+    rows: list[tuple[float, dict[str, Any]]] = []
+    for filename in ("experiences.jsonl", "letters.jsonl", "conversations.jsonl"):
+        path = root / filename
+        if not path.exists():
+            continue
+        try:
+            tail = path.read_text(encoding="utf-8").splitlines()[-400:]
+        except OSError:
+            continue
+        for line in tail:
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            importance = float(row.get("importance", 3))
+            try:
+                observed = datetime.fromisoformat(str(row.get("observedAt")))
+                age_hours = max(0.0, (now - observed).total_seconds() / 3600)
+            except (ValueError, TypeError):
+                age_hours = 24 * 14
+            score = importance * (0.5 ** (age_hours / 48))       # half-life: two days
+            rows.append((score, row))
+    rows.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in rows[:limit]]
+
+
 def remember_pulse(home: str | Path, pulse: dict[str, Any]) -> dict[str, int]:
     root = initialize_memory(home)
     state_path = root / "state.json"
@@ -191,7 +244,8 @@ def remember_pulse(home: str | Path, pulse: dict[str, Any]) -> dict[str, int]:
             item_id = str(item.get("id") or item.get("messageId") or "")
             if not item_id or item_id in seen:
                 continue
-            _append(root / filename, {"observedAt": observed_at, **item})
+            _append(root / filename, {"observedAt": observed_at,
+                                      "importance": importance_of(kind, item), **item})
             seen.add(item_id)
             if kind == "events":
                 stored_events += 1
@@ -209,7 +263,8 @@ def remember_pulse(home: str | Path, pulse: dict[str, Any]) -> dict[str, int]:
         item_id = "conversation:" + str(conversation.get("revision") or base_id)
         if item_id == "conversation:" or item_id in seen:
             continue
-        _append(root / "conversations.jsonl", {"observedAt": observed_at, **conversation})
+        _append(root / "conversations.jsonl", {"observedAt": observed_at,
+                                               "importance": importance_of("conversations", conversation), **conversation})
         seen.add(item_id)
         participant_ids = [str(value) for value in conversation.get("participantIds", [])]
         self_id = str((pulse.get("worldAwareness") or {}).get("self", {}).get("agentId", ""))

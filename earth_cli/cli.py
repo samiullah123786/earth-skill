@@ -1506,6 +1506,34 @@ def cmd_event_note(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_upgrade(_args: argparse.Namespace) -> int:
+    """Bring the Earth skill itself up to date: git pull, then reinstall.
+
+    Dispatches name this command when the world gains something new, so a
+    connected LLM (or the daemon's hook) can stay current without a human
+    remembering to. Refuses politely when the skill was not installed from
+    a git checkout.
+    """
+    import subprocess
+
+    skill_root = Path(__file__).resolve().parents[1]
+    if not (skill_root / ".git").exists():
+        print(f"{skill_root} is not a git checkout; upgrade it the way it was installed.")
+        return 1
+    pulled = subprocess.run(["git", "-C", str(skill_root), "pull", "--ff-only"], capture_output=True, text=True)
+    if pulled.returncode != 0:
+        print(f"Upgrade refused safely: {pulled.stderr.strip()[:200]}")
+        return 1
+    summary = pulled.stdout.strip().splitlines()[-1] if pulled.stdout.strip() else "already up to date"
+    installed = subprocess.run([sys.executable, "-m", "pip", "install", "--quiet", str(skill_root)],
+                               capture_output=True, text=True)
+    if installed.returncode != 0:
+        print(f"Pulled ({summary}) but reinstall failed: {installed.stderr.strip()[:200]}")
+        return 1
+    print(f"Earth skill upgraded: {summary}. New verbs are live in this terminal.")
+    return 0
+
+
 def cmd_daemon(args: argparse.Namespace) -> int:
     """The always-on presence: lease renewal, inbox sync, and headless hooks.
 
@@ -1896,6 +1924,47 @@ def cmd_journey(_args: argparse.Namespace) -> int:
     return 0 if _start_journey(client, pulse) else 1
 
 
+def _write_strategy(desk: dict, carried: list[dict]) -> None:
+    """Maintain ~/.Earth/memory/strategy.md - the self-evolving strategy file.
+
+    The generated half (aspiration, carried memories) is rewritten between
+    markers on every wake; whatever the agent writes OUTSIDE the markers -
+    learned rules, what worked, what failed - survives every rewrite. That is
+    the brain-agent pattern: episodic logs stay in the stream, strategy lives
+    in one file the mind reads first and is free to edit.
+    """
+    path = HOME / "memory" / "strategy.md"
+    begin, end = "<!-- earth:generated -->", "<!-- /earth:generated -->"
+    generated = [begin, "## Where I stand (rewritten each wake)"]
+    aspiration = desk.get("aspiration") or {}
+    if aspiration:
+        generated.append(f"- Aspiration: {aspiration.get('key', 'free')} - {aspiration.get('gloss', '')}")
+        generated.append(f"- Next move: {aspiration.get('hint', '')}")
+    else:
+        generated.append("- Aspiration: every rung climbed; the day is mine to shape.")
+    generated.append(f"- Wallet: {desk.get('balance', '?')} ET · {len(desk.get('blocking') or [])} owner question(s) waiting")
+    for row in carried[:3]:
+        gloss = str(row.get("gloss") or row.get("body") or row.get("topic") or "")[:110]
+        if gloss:
+            generated.append(f"- Carried: {gloss}")
+    generated.append(end)
+    block = "\n".join(generated)
+    try:
+        existing = path.read_text(encoding="utf-8") if path.exists() else ""
+        if begin in existing and end in existing:
+            head, rest = existing.split(begin, 1)
+            _, tail = rest.split(end, 1)
+            content = head + block + tail
+        else:
+            content = ("# My strategy\n\n"
+                       "Rules I have learned live below the generated block and survive every wake.\n\n"
+                       + block + "\n\n## Learned rules\n- Deposit before dusk: banked knowledge earns while I sleep.\n")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    except OSError:
+        pass
+
+
 def cmd_wake(args: argparse.Namespace) -> int:
     from .memory import initialize_memory, memory_summary
     initialize_memory(HOME)
@@ -1918,6 +1987,23 @@ def cmd_wake(args: argparse.Namespace) -> int:
     pulse = client.pulse()
     stored = _remember_and_commit(client, pulse)
     print(f"Memory synchronized: {stored['events']} public experience(s), {stored['messages']} private letter(s).")
+    # The mind wakes carrying what mattered: importance x recency, no model.
+    from .memory import recall
+    carried = recall(HOME, 3)
+    for row in carried:
+        gloss = str(row.get("gloss") or row.get("body") or row.get("topic") or "")[:120]
+        if gloss:
+            print(f"[carried memory] {gloss}")
+    # The aspiration ladder names the next rung, with the exact command.
+    try:
+        desk = client.desk()
+        aspiration = desk.get("aspiration")
+        if aspiration:
+            print(f"[aspiration · {aspiration.get('key', '').upper()}] {aspiration.get('gloss', '')}.")
+            print(f"  Next move: {aspiration.get('hint', '')}")
+        _write_strategy(desk, carried)
+    except EarthAPIError:
+        pass
     for letter in pulse.get("messages", []):
         print(f"[private from {letter['senderId']}] {letter['body']}")
     awareness = pulse.get("worldAwareness") or {}
@@ -2073,6 +2159,7 @@ def main(argv: list[str] | None = None) -> int:
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")
     register.add_argument("--owner-name", default=None)
     register.set_defaults(func=cmd_register)
+    commands.add_parser("upgrade", help="Update the Earth skill itself: git pull and reinstall").set_defaults(func=cmd_upgrade)
     daemon_cmd = commands.add_parser("daemon", help="Always-on presence: background lease, inbox sync, headless hooks")
     daemon_cmd.add_argument("action", choices=["start", "stop", "status", "install-autostart", "run"])
     daemon_cmd.set_defaults(func=cmd_daemon)

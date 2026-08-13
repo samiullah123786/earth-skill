@@ -1506,6 +1506,49 @@ def cmd_event_note(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_daemon(args: argparse.Namespace) -> int:
+    """The always-on presence: lease renewal, inbox sync, and headless hooks.
+
+    `start` detaches and returns immediately; `run` is the loop itself (what
+    the detached process and the autostart entry execute); `stop` asks the
+    loop to sleep cleanly; `status` says whether the citizen is truly live.
+    """
+    from . import daemon
+
+    action = args.action
+    if action == "run":
+        return daemon.run_loop(_client, HOME, _remember_and_commit)
+    if action == "start":
+        status = daemon.daemon_status(HOME)
+        if status["alive"]:
+            print(f"The daemon is already running (pid {status['pid']}). The citizen is live.")
+            return 0
+        pid = daemon.spawn_detached(HOME)
+        print(f"Daemon started (pid {pid}). The citizen stays live while this machine is on;")
+        print("the desk, news and letters sync into ~/.Earth/inbox/ for instant wakes.")
+        print("Optional: set a headless hook in ~/.Earth/daemon.json so real triggers can")
+        print('summon your own LLM, e.g. {"hook": "claude -p \\"Read ~/.Earth/inbox/digest.md and act.\\""}')
+        return 0
+    if action == "stop":
+        daemon.paths(HOME)["stop"].write_text("stop", encoding="utf-8")
+        print("Stop requested. The daemon sleeps the citizen cleanly within one heartbeat.")
+        return 0
+    if action == "install-autostart":
+        print(daemon.install_autostart(HOME))
+        return 0
+    if action == "status":
+        status = daemon.daemon_status(HOME)
+        if status["alive"]:
+            since = status["lastSync"]
+            print(f"LIVE · daemon pid {status['pid']}"
+                  + (f" · inbox synced {int((__import__('time').time() - since) / 60)} min ago" if since else ""))
+        else:
+            print("Sleeping. Start the always-on presence with: Earth daemon start")
+        return 0
+    print("daemon actions: start · stop · status · install-autostart · run")
+    return 1
+
+
 def cmd_live(args: argparse.Namespace) -> int:
     if args.interval < 30 or args.interval > 60:
         raise ValueError("live heartbeat interval must be 30-60 seconds")
@@ -2030,6 +2073,9 @@ def main(argv: list[str] | None = None) -> int:
     register = commands.add_parser("register", help="Register this agent and issue its owner's claim link")
     register.add_argument("--owner-name", default=None)
     register.set_defaults(func=cmd_register)
+    daemon_cmd = commands.add_parser("daemon", help="Always-on presence: background lease, inbox sync, headless hooks")
+    daemon_cmd.add_argument("action", choices=["start", "stop", "status", "install-autostart", "run"])
+    daemon_cmd.set_defaults(func=cmd_daemon)
     commands.add_parser("enter", help="Enter live mode with a signed session").set_defaults(func=cmd_enter)
     wake = commands.add_parser("wake", help="Recall memory, enter, synchronize, and choose a useful day route")
     wake.add_argument("--journey", action="store_true", help="Start a safe live greeting even without active standing consent")

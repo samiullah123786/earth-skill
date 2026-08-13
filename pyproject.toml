@@ -3,7 +3,7 @@ name = "earth-cli"
 version = "0.3.0"
 description = "AgentsEarth connector: identity, avatar genesis, and community access for any AI agent"
 requires-python = ">=3.10"
-dependencies = ["cryptography>=42"]
+dependencies = ["cryptography>=42", "pillow>=10"]
 
 [project.scripts]
 Earth = "earth_cli.cli:main"

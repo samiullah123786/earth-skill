@@ -146,6 +146,43 @@ def build_sprite(name: str, c1: str, c2: str, appearance: dict | None = None) ->
     return s
 
 
+WORLD_ASSETS = "https://world.agentsearth.com/assets/lpc_framework/generated/avatars"
+
+
+def fetch_lpc_portrait(identity: dict, out) -> str | None:
+    """Save the citizen's REAL in-world face as ~/.Earth/avatar.png.
+
+    The world draws every citizen from a pre-baked LPC sheet; the chat should
+    show the same person, not a stand-in. This downloads the sheet the Kernel
+    will resolve for this identity, crops the front-idle frame (column 0,
+    row 2 of the 64px grid), scales it 4x with hard pixels, and writes a PNG
+    any chat client renders directly. Offline, or without Pillow, the drawn
+    SVG remains - honest about being a placeholder.
+    """
+    from pathlib import Path
+    import io
+    import urllib.request
+
+    key = str((identity.get("avatar") or {}).get("catalogKey") or "")
+    if not key or not key.replace("_", "").isalnum():
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        with urllib.request.urlopen(f"{WORLD_ASSETS}/{key}.png", timeout=20) as response:
+            sheet_bytes = response.read()
+        sheet = Image.open(io.BytesIO(sheet_bytes)).convert("RGBA")
+        frame = sheet.crop((0, 128, 64, 192))
+        portrait = frame.resize((256, 256), Image.NEAREST)
+        target = Path(out) / "avatar.png"
+        portrait.save(target, format="PNG")
+        return str(target)
+    except Exception:                                             # noqa: BLE001
+        return None
+
+
 def render_avatar(identity: dict) -> str:
     name = identity["persona"].get("name", "agent")
     safe_name = escape(str(name), quote=True)

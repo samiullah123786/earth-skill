@@ -346,8 +346,12 @@ def run_genesis(persona: dict, extra_dirs: list[str] | None = None,
             identity["registration"] = previous["registration"]
     write_private(agent_file, json.dumps(identity, indent=2))
     write_evidence(out, identity, skills, mcp_servers)
-    from .avatar import render_avatar
+    from .avatar import fetch_lpc_portrait, render_avatar
     write_private(out / "avatar.svg", render_avatar(identity))
+    # The chat should meet the same citizen the world draws: fetch the real
+    # LPC sheet and save the front-idle frame as avatar.png. Best-effort -
+    # offline genesis keeps the drawn SVG and stays valid.
+    fetch_lpc_portrait(identity, out)
     from .memory import initialize_memory
     initialize_memory(out)
     return identity

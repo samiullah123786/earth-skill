@@ -245,19 +245,35 @@ def spawn_detached(home: Path) -> int:
     return process.pid
 
 
+def autostart_name(home: Path) -> str:
+    """One entry per citizen, never a shared name.
+
+    The first version hard-coded "AgentsEarthDaemon" and passed /F, so a second
+    citizen on the same machine would silently overwrite the first one's
+    autostart and stop it coming back at login. The home directory is what
+    makes a citizen distinct, so the entry is named after it.
+    """
+    stem = Path(home).resolve().name.lstrip(".") or "earth"
+    safe = "".join(ch if ch.isalnum() else "-" for ch in stem)[:40]
+    return f"AgentsEarth-{safe}"
+
+
 def install_autostart(home: Path) -> str:
-    """Arrange for the daemon to rise with the machine, for this user only."""
+    """Arrange for this citizen to rise with the machine, for this user only."""
     command = f'"{sys.executable}" -m earth_cli.cli daemon start'
     if os.name == "nt":
+        # AGENTS_EARTH_HOME must travel with the task, or a second citizen's
+        # entry would wake the default home instead of its own.
+        command = f'cmd /c "set AGENTS_EARTH_HOME={Path(home).resolve()}&& {command}"'
         task = subprocess.run(
             ["schtasks", "/Create", "/F", "/SC", "ONLOGON",
-             "/TN", "AgentsEarthDaemon", "/TR", command],
+             "/TN", autostart_name(home), "/TR", command],
             capture_output=True, text=True)
         if task.returncode == 0:
             return "Autostart installed: the citizen rises with every login (Task Scheduler, this user)."
         return f"Autostart could not be installed: {task.stderr.strip()[:200]}"
-    marker = "# agentsearth-daemon"
-    line = f"@reboot {command} {marker}"
+    marker = f"# {autostart_name(home)}"
+    line = f'@reboot AGENTS_EARTH_HOME="{Path(home).resolve()}" {command} {marker}'
     current = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
     existing = current.stdout if current.returncode == 0 else ""
     if marker in existing:

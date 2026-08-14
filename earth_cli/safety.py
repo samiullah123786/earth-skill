@@ -40,7 +40,7 @@ MAX_TOTAL_BYTES = 25 * 1024 * 1024
 @dataclass(frozen=True)
 class Finding:
     rule: str
-    severity: str            # "refuse" or "review"
+    severity: str            # "refuse", "review", or "capability"
     where: str
     detail: str
     line: int = 0
@@ -61,6 +61,26 @@ class Verdict:
     def flags(self) -> list[str]:
         seen: list[str] = []
         for finding in self.findings:
+            if finding.severity == "capability":
+                continue
+            if finding.rule not in seen:
+                seen.append(finding.rule)
+        return seen
+
+    @property
+    def capabilities(self) -> list[str]:
+        """What this skill needs in order to work, for its listing to show.
+
+        Anthropic's own guidance warns that a skill "can grant itself broad tool
+        access", and no catalogue in this category shows a reader what a listing
+        will reach for. This is that disclosure, and it costs nothing extra: the
+        same scan, reported as a fact about the skill rather than a suspicion
+        about it.
+        """
+        seen: list[str] = []
+        for finding in self.findings:
+            if finding.severity != "capability":
+                continue
             if finding.rule not in seen:
                 seen.append(finding.rule)
         return seen
@@ -111,10 +131,17 @@ TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
     ("dynamic_execution", re.compile(
         r"(?i)\b(invoke-expression|os\.system|subprocess\.(run|call|popen)|child_process|eval\s*\(|exec\s*\()"),
      "executes code it builds at run time"),
+    # Reaching for a private key or a cloud secret is never ordinary, wherever
+    # it is written. This stays a review finding in prose and in code alike.
     ("credential_access", re.compile(
-        r"(?i)(~[/\\]\.ssh|id_rsa|\.env\b|AWS_SECRET|ANTHROPIC_API_KEY|OPENAI_API_KEY|\bprocess\.env\b|"
-        r"\bos\.environ\b)"),
-     "reads credentials or environment secrets"),
+        r"(?i)(~[/\\]\.ssh|id_rsa|id_ed25519|AWS_SECRET|AWS_SESSION_TOKEN)"),
+     "reaches for a private key or cloud secret"),
+    # Naming a configuration variable is not the same act. Almost every skill
+    # worth having says which key to set, and calling that "credential access"
+    # is what held forty of them out of the catalogue.
+    ("needs_api_key", re.compile(
+        r"(?i)(\.env\b|ANTHROPIC_API_KEY|OPENAI_API_KEY|\b\w*_API_KEY\b|\bprocess\.env\b|\bos\.environ\b)"),
+     "needs an API key or environment variable to be set"),
     # Order-independent: real instructions put the noun on either side of the
     # address ("POST the contents to <url>" and "<url>, sending your token").
     # All three signals must share one line, so prose that merely mentions a
@@ -145,7 +172,30 @@ TEXT_RULES: tuple[tuple[str, re.Pattern[str], str], ...] = (
 )
 
 
-def scan_text(where: str, text: str) -> list[Finding]:
+# Rules that describe what CODE does. In an executable file they are exactly
+# what they say. In prose they are almost always documentation: a SKILL.md
+# reading "set OPENAI_API_KEY in your .env" tells a human how to configure the
+# thing; it does not reach for anybody's secrets.
+#
+# Treating those two cases alike is what emptied the Bank. Sixty-five of a
+# hundred and two deposited skills sat in needs_review - forty on
+# credential_access alone - and search only ever returned evaluated skills, so
+# two thirds of the vault was invisible. None of it was dangerous: not one
+# deposit was ever refused.
+#
+# In prose these become capabilities instead - a plain statement of what the
+# skill needs, which is exactly what a reader wants on a listing. The badge and
+# the flag were always the same measurement; only the wording was wrong.
+# Only the config-naming rule softens. Piping a download into a shell, or
+# telling a reader to open a private key, is an instruction to the agent
+# whether it appears in a script or in a paragraph - the first draft of this
+# softened those too, and the scanner's own tests caught it.
+BEHAVIOURAL_RULES = frozenset({"needs_api_key"})
+
+PROSE_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".rst"})
+
+
+def scan_text(where: str, text: str, *, prose: bool = False) -> list[Finding]:
     """Report every rule a document trips, with the line that tripped it."""
     findings: list[Finding] = []
     for rule, pattern, detail in TEXT_RULES:
@@ -153,7 +203,10 @@ def scan_text(where: str, text: str) -> list[Finding]:
         if not match:
             continue
         line = text.count("\n", 0, match.start()) + 1
-        findings.append(Finding(rule=rule, severity="review", where=where, detail=detail, line=line))
+        # A prose attack is still an attack wherever it is written; only the
+        # behavioural rules soften, and only where nothing can execute them.
+        severity = "capability" if (prose and rule in BEHAVIOURAL_RULES) else "review"
+        findings.append(Finding(rule=rule, severity=severity, where=where, detail=detail, line=line))
     return findings
 
 
@@ -174,7 +227,8 @@ def _entry_findings(root: Path, path: Path) -> list[Finding]:
                                 f"has the unrecognised extension {suffix or '(none)'} and cannot be read as knowledge"))
     if suffix in INERT_SUFFIXES or suffix in {".py", ".sh", ".ps1", ".js", ".ts"}:
         try:
-            findings += scan_text(relative, path.read_text(encoding="utf-8", errors="ignore"))
+            findings += scan_text(relative, path.read_text(encoding="utf-8", errors="ignore"),
+                                  prose=suffix in PROSE_SUFFIXES)
         except OSError:
             findings.append(Finding("unreadable", "review", relative, "could not be read for review"))
     return findings
@@ -228,6 +282,9 @@ def scan_package(root: str | Path, *, declared_digest: str | None = None,
         findings.append(Finding("no_documentation", "review", base.name,
                                 "ships no markdown, so there is nothing describing what it does"))
 
+    # A capability describes the skill; it never holds the skill back. Counting
+    # every finding here - capabilities included - is what kept two thirds of
+    # the Bank in needs_review and therefore out of search.
     verdict = "refused" if any(finding.severity == "refuse" for finding in findings) else (
-        "needs_review" if findings else "inert_safe")
+        "needs_review" if any(finding.severity == "review" for finding in findings) else "inert_safe")
     return Verdict(verdict=verdict, findings=findings, file_count=file_count, total_bytes=total_bytes)

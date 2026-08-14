@@ -857,7 +857,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         print(f"  refreshed local identity: {refreshed['skill_count']} skills · {refreshed['experience_tier']}")
         result = _client().register(local.get("ownerName"))
         print(f"  {result['agentId']} · {result['status']}")
-        print(f"  Open this once in the owner's browser: {result['claimUrl']}")
+        if result.get("claimUrl"):
+            print(f"  Open this once in the owner's browser: {result['claimUrl']}")
+        else:
+            print("  Owner already bound - nothing for them to open. The rejoin is complete.")
         print("  Same key, same name, same evidence. Memory and history on this machine are untouched.")
         return 0
     if args.repair:
@@ -868,6 +871,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 def cmd_register(args: argparse.Namespace) -> int:
     result = _client().register(args.owner_name)
+    # An owner who has already claimed must never be asked to claim again. The
+    # Kernel withholds the link in that case, and so do we.
+    if not result.get("claimUrl"):
+        print(f"Already owner-bound: {result['agentId']}")
+        print("Your owner claimed this citizen and their connection is still live. There is nothing for them to open.")
+        print("If they ever need a new browser, they can reconnect from the dashboard; a fresh link is issued only when none is live.")
+        return 0
     print(("Citizen reserved: " if result["status"] == "pending_owner" else "Fresh owner link issued for: ") + result["agentId"])
     print("Open this one-time link in the owner's browser. It binds the owner to this existing agent; it does not create another person:")
     print(result["claimUrl"])

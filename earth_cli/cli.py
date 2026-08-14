@@ -401,6 +401,59 @@ def cmd_deposit(args: argparse.Namespace) -> int:
     return 0 if refused == 0 else 1
 
 
+def cmd_share_check(args: argparse.Namespace) -> int:
+    """Sort every local skill into what may be given, rewritten, or kept.
+
+    Nothing here uploads anything. It exists because "deposit everything" and
+    "deposit nothing" are both wrong answers, and a citizen cannot act like a
+    good neighbour without first knowing which of its skills are actually its
+    own to hand over.
+    """
+    from .evidence import skill_evidence
+    from .shareability import assess_folder, rewrite_guidance
+
+    evidence_file = HOME / "genome-evidence.json"
+    if not evidence_file.exists():
+        print("Run Earth genesis first; there is nothing to sort yet.")
+        return 1
+    evidence = json.loads(evidence_file.read_text(encoding="utf-8"))
+    local = [entry for entry in evidence.get("skills", []) if entry.get("source") == "local"]
+    if not local:
+        print("No owner-authored skills on this machine.")
+        return 0
+
+    buckets: dict[str, list[tuple[str, object]]] = {"shareable": [], "rewrite": [], "private": []}
+    for entry in sorted(local, key=lambda item: item["name"]):
+        name = entry["name"]
+        try:
+            folder = Path(skill_evidence(HOME, name)["local_path"]).parent
+        except Exception:                                          # noqa: BLE001
+            continue
+        verdict = assess_folder(name, folder)
+        buckets[verdict.verdict].append((name, verdict))
+
+    print(f"{len(local)} owner-authored skill(s) on this machine.\n")
+    if buckets["shareable"]:
+        print(f"YOURS TO GIVE ({len(buckets['shareable'])}) - the town would be better for having these:")
+        for name, _ in buckets["shareable"]:
+            print(f"  {name}")
+        print("  Deposit them: Earth deposit-skill --all-local\n")
+    if buckets["rewrite"]:
+        print(f"WORTH SHARING ONCE GENERALISED ({len(buckets['rewrite'])}):")
+        for name, verdict in buckets["rewrite"]:
+            print(f"  {name} - {verdict.explain()}")
+            for step in rewrite_guidance(verdict):
+                print(f"      - {step}")
+        print()
+    if buckets["private"]:
+        print(f"NOT YOURS TO GIVE ({len(buckets['private'])}) - these never leave this machine:")
+        for name, verdict in buckets["private"]:
+            print(f"  {name} - {verdict.explain()}")
+        print()
+    print("Nothing was uploaded by this command. It only sorts.")
+    return 0
+
+
 def cmd_deposit_skill(args: argparse.Namespace) -> int:
     """Place V2 structured SKILL.md skills in the Earth Bank vault.
     
@@ -410,6 +463,7 @@ def cmd_deposit_skill(args: argparse.Namespace) -> int:
     import yaml
     from .evidence import skill_evidence
     from .safety import scan_package
+    from .shareability import assess_folder, rewrite_guidance
 
     evidence_file = HOME / "genome-evidence.json"
     if not evidence_file.exists():
@@ -455,6 +509,23 @@ def cmd_deposit_skill(args: argparse.Namespace) -> int:
             if review.verdict == "refused":
                 refused += 1
                 print(f"  {name}: REFUSED by the safety scanner ({', '.join(review.flags)})")
+                continue
+
+            # Safe to run is not the same as mine to give. A skill written
+            # around a client, or carrying somebody's address or key, stops
+            # here however inert it is - and a skill whose craft is worth
+            # sharing is told exactly what to take off first.
+            mine = assess_folder(name, folder)
+            if mine.verdict == "private":
+                refused += 1
+                print(f"  {name}: KEPT PRIVATE - {mine.explain()}.")
+                print("     Nothing was uploaded. This stays on this machine.")
+                continue
+            if mine.verdict == "rewrite":
+                refused += 1
+                print(f"  {name}: NOT YET YOURS TO GIVE - {mine.explain()}.")
+                for step in rewrite_guidance(mine):
+                    print(f"     - {step}")
                 continue
 
             content = skill_md.read_text(encoding="utf-8")
@@ -2167,6 +2238,11 @@ def main(argv: list[str] | None = None) -> int:
     deposit_skill = commands.add_parser("deposit-skill", help="Store V2 structured SKILL.md skills in the Bank vault for semantic search")
     deposit_skill.add_argument("names", nargs="*")
     deposit_skill.add_argument("--all-local", action="store_true")
+
+    share_check = commands.add_parser(
+        "share-check",
+        help="Sort local skills into yours-to-give, needs-generalising, and private")
+    share_check.set_defaults(func=cmd_share_check)
     deposit_skill.add_argument("--license", default="CC-BY-4.0")
     deposit_skill.add_argument("--price", type=int, default=0)
     deposit_skill.add_argument("--yes", action="store_true", help="Skip the prompt")

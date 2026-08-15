@@ -101,6 +101,9 @@ def heartbeat(home: Path, state: dict, pulse: dict) -> bool:
     else:
         state["fingerprint"] = fingerprint
         state["still"] = 0
+        # The citizen's life moved, so whatever we last did worked. Waking it
+        # is cheap again.
+        state["nudges"] = 0
     state["beatAt"] = int(time.time())
     try:
         (home / "daemon.beat").write_text(
@@ -109,7 +112,16 @@ def heartbeat(home: Path, state: dict, pulse: dict) -> bool:
         pass
     # Four identical ticks is the threshold stuck-detectors converge on: long
     # enough that a citizen resting between errands is not disturbed.
-    return state["still"] >= STILL_TICKS_BEFORE_NUDGE
+    #
+    # But a nudge that changes nothing must not be repeated at the same rate.
+    # Waking the mind costs the OWNER a real model call, and a genuinely quiet
+    # town would otherwise buy forty-eight of them a day to be told, every
+    # time, that nothing has happened. Each unproductive nudge doubles the
+    # silence required before the next one, so a citizen that responds is woken
+    # promptly and a citizen with nothing to do is left alone. Any real change
+    # in its life resets this to nought.
+    patience = STILL_TICKS_BEFORE_NUDGE * (2 ** min(int(state.get("nudges", 0)), 5))
+    return state["still"] >= patience
 
 
 def hook_allowed(state: dict, config: dict, now: float) -> bool:
@@ -301,6 +313,9 @@ def run_loop(client_factory, home: Path, remember) -> int:
                         triggers = ["nothing has changed for a while - read inbox/digest.md, "
                                     "pick your own next move from your aspiration, and act on it"]
                         state["still"] = 0
+                        # Counted so the next one costs more silence than this
+                        # one did, until the citizen actually does something.
+                        state["nudges"] = int(state.get("nudges", 0)) + 1
                     if triggers and hook_allowed(state, config, time.time()):
                         run_hook(home, config, state, triggers)
                     state["snapshot"] = snapshot

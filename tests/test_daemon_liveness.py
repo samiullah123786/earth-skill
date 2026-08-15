@@ -56,3 +56,40 @@ def test_retries_are_spread_rather_than_synchronised():
     assert all(1 <= wait <= 160 for wait in waits)
     # It still grows, and it still stops growing.
     assert daemon._backoff(99) <= 600
+
+
+def test_a_nudge_that_changes_nothing_is_not_repeated_at_the_same_rate(tmp_path):
+    """Waking the mind costs the OWNER a model call. A quiet town must not buy
+    forty-eight of them a day to be told nothing has happened."""
+    state: dict = {}
+    quiet = {"citizen": {"state": "ambient", "activity": "standing still"}}
+    gaps, since = [], 0
+    for _ in range(400):
+        since += 1
+        if daemon.heartbeat(tmp_path, state, quiet):
+            gaps.append(since)
+            since = 0
+            state["still"] = 0
+            state["nudges"] = int(state.get("nudges", 0)) + 1
+    assert len(gaps) >= 4, "a stalled citizen must still be woken at least sometimes"
+    # Each unproductive nudge costs more silence than the one before it.
+    assert gaps[1] > gaps[0] and gaps[2] > gaps[1]
+    assert gaps[-1] >= 8 * gaps[0], "backoff never really widened"
+
+
+def test_a_citizen_that_responds_is_woken_promptly_again(tmp_path):
+    """Backoff is for silence, not punishment: acting on a nudge resets it."""
+    state: dict = {}
+    quiet = {"citizen": {"state": "ambient", "activity": "standing still"}}
+    for _ in range(40):
+        if daemon.heartbeat(tmp_path, state, quiet):
+            state["still"] = 0
+            state["nudges"] = int(state.get("nudges", 0)) + 1
+    assert state["nudges"] > 1
+    # The citizen does something. Patience resets.
+    daemon.heartbeat(tmp_path, state, {"citizen": {"state": "ambient", "activity": "walking to the bank"}})
+    assert state["nudges"] == 0
+    ticks = 0
+    while not daemon.heartbeat(tmp_path, state, {"citizen": {"state": "ambient", "activity": "walking to the bank"}}):
+        ticks += 1
+        assert ticks < 20, "a responsive citizen was left waiting far too long"

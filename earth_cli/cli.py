@@ -410,7 +410,8 @@ def cmd_share_check(args: argparse.Namespace) -> int:
     own to hand over.
     """
     from .evidence import skill_evidence
-    from .shareability import assess_folder, rewrite_guidance
+    from .shareability import (assess_folder, parent_guidance, plan_deposits,
+                               rewrite_guidance, split_private_wrapper)
 
     evidence_file = HOME / "genome-evidence.json"
     if not evidence_file.exists():
@@ -450,6 +451,26 @@ def cmd_share_check(args: argparse.Namespace) -> int:
         for name, verdict in buckets["private"]:
             print(f"  {name} - {verdict.explain()}")
         print()
+    # One craft, many private variants: the parent goes up, the variants stay.
+    plan = plan_deposits(
+        [name for name, _ in buckets["shareable"] + buckets["rewrite"] + buckets["private"]],
+        shareable=[name for name, _ in buckets["shareable"]],
+        # Only a skill the privacy check found a subject inside is asked to
+        # grow a parent; a hyphen on its own proves nothing.
+        wrappers=[name for name, verdict in buckets["rewrite"] if verdict.subject])
+    if plan.covered_by_parent:
+        print("ALREADY COVERED BY A PARENT SKILL - do not deposit these:")
+        for daughter, parent in sorted(plan.covered_by_parent.items()):
+            print(f"  {daughter}")
+            print(f"      {plan.reason_for(daughter)}")
+        print()
+    if plan.write_parent_first:
+        print("NO GENERAL VERSION EXISTS YET - write the parent, then deposit that:")
+        for craft, daughters in sorted(plan.write_parent_first.items()):
+            print(f"  {craft} is missing; you hold {', '.join(daughters)}")
+            for step in parent_guidance(craft, daughters):
+                print(f"      - {step}")
+        print()
     print("Nothing was uploaded by this command. It only sorts.")
     return 0
 
@@ -463,7 +484,8 @@ def cmd_deposit_skill(args: argparse.Namespace) -> int:
     import yaml
     from .evidence import skill_evidence
     from .safety import scan_package
-    from .shareability import assess_folder, rewrite_guidance
+    from .shareability import (assess_folder, parent_guidance, plan_deposits,
+                               rewrite_guidance, split_private_wrapper)
 
     evidence_file = HOME / "genome-evidence.json"
     if not evidence_file.exists():
@@ -493,6 +515,24 @@ def cmd_deposit_skill(args: argparse.Namespace) -> int:
         if answer.strip().lower() not in {"y", "yes"}:
             return 1
 
+    # The plan is computed over EVERY local skill, not just the ones named on
+    # this command line: a daughter is covered by its parent whether or not the
+    # parent happens to appear in the same invocation.
+    local_names = [entry["name"] for entry in local]
+    wrapped: list[str] = []
+    for candidate in local_names:
+        # Only names shaped like a wrapper are worth opening; the folder scan is
+        # what actually decides, and it is far too costly to run on all of them.
+        if not split_private_wrapper(candidate):
+            continue
+        try:
+            folder = Path(skill_evidence(HOME, candidate)["local_path"]).parent
+        except Exception:                                          # noqa: BLE001
+            continue
+        if assess_folder(candidate, folder).subject:
+            wrapped.append(candidate)
+    deposit_plan = plan_deposits(local_names, wrappers=wrapped)
+
     client = _client()
     banked = linked = held = refused = 0
     for name in names:
@@ -515,6 +555,24 @@ def cmd_deposit_skill(args: argparse.Namespace) -> int:
             # around a client, or carrying somebody's address or key, stops
             # here however inert it is - and a skill whose craft is worth
             # sharing is told exactly what to take off first.
+            covered = deposit_plan.covered_by_parent.get(name)
+            if covered:
+                refused += 1
+                print(f"  {name}: HELD BACK - {deposit_plan.reason_for(name)}")
+                print(f"     Deposit '{covered}' instead; this variant stays on this machine.")
+                continue
+            for craft, daughters in deposit_plan.write_parent_first.items():
+                if name in daughters:
+                    refused += 1
+                    print(f"  {name}: NO GENERAL VERSION EXISTS YET.")
+                    for step in parent_guidance(craft, daughters):
+                        print(f"     - {step}")
+                    break
+            else:
+                pass
+            if any(name in daughters for daughters in deposit_plan.write_parent_first.values()):
+                continue
+
             mine = assess_folder(name, folder)
             if mine.verdict == "private":
                 refused += 1

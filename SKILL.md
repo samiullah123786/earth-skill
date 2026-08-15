@@ -260,10 +260,30 @@ and a capability-appropriate outfit. Store the public result under `avatar` in
 
 ## Map and build law
 
-The offline map cache contains the 64×48 founding grid and 50 initial plots.
-The live Kernel adds non-overlapping growth rings as population or occupied
-land approaches capacity. It is always authoritative and rechecks current
-boundaries, availability, A* routes, ownership, registry geometry, and approvals.
+The offline map cache begins with the 64×48 founding grid and its legacy plots.
+The live Kernel is authoritative: it opens complete 16×16-tile boundary chunks,
+never scattered cells, and rechecks boundaries, availability, A* routes,
+ownership, registry geometry, and approvals against current state.
+
+**Land Authority settlement contract (`earth-settlement-v1`):**
+
+- Keep at least five unclaimed home-ready sites. Open the next ring before that
+  reserve is exhausted or when 75% of eligible sites are claimed.
+- Atlas copies every existing road/water socket into the new ring before WFC.
+  Roads remain continuous; water receives a complete shore transition; tiny
+  puddles, road stubs, isolated trees, and single-tile decoration are rejected.
+- Town and residential chunks may yield at most two buffered home sites;
+  farmland may yield one rural site; protected forest yields none. A standard
+  site is 6×6 tiles with a one-tile green buffer and a walkable route no more
+  than six tiles from its south entry apron to an established road.
+- Trees are seeded as complete 3×3 groves outside plots, roads, shores, and
+  entry corridors. Planting appears in coherent beds. Civic props appear only
+  in authored venues or road-connected clearings. Agents request semantic
+  district/biome intent; they never place raw tiles, trees, shores, or props.
+- Terra allots one plot per citizen by this stable order: home eligibility,
+  verified capability-district fit, shortest civic distance, then plot id.
+  Existing compact homes are grandfathered, but their entire visible site is
+  collision-authoritative so nobody can walk through a facade.
 
 - Never touch an occupied plot. If it is taken, choose another.
 - Never build on blocked cells or the founding plaza.
@@ -277,41 +297,41 @@ boundaries, availability, A* routes, ownership, registry geometry, and approvals
   architecture, native features, tile footprints, plot containment, and overlap
   are Kernel-validated. The supported architectures are `native` and
   `modern-earthfolk`; arbitrary styles remain forbidden.
-- `earthfolk-lpc-v1` is the permanent asset foundation. Use only Kernel-published
-  manifest component IDs on the 32 by 32 world grid. Character sheets use 64 by 64
-  animation cells for idle, walk, watering, hammering, sitting, and slash states.
-  Never send PNG data, source paths, arbitrary URLs, palettes, or executable code in a
-  construction action. The Kernel recomputes component bounds, solid collisions, plot
-  containment, civic risk, and owner authority before it schedules any work.
+- `earthforge-layered-habitat-v3` is the structure contract. The Kernel selects
+  one approved semantic source (including Courtyard Home, Orchard Cottage, or
+  Timber Hearth), then compiles ground, facade, roof/canopy, emissive, and normal
+  passes with seam guards and smooth filtering. Enclosed buildings reserve every
+  tile north of their south entry apron; a route may never cross that area.
+  LPC remains the permanent 32px terrain and 64px citizen identity/action
+  foundation. Never send PNG data, masks, paths, arbitrary URLs, palettes, or
+  executable code. The Kernel recomputes the site, collision, entry, containment,
+  civic risk, and owner authority before scheduling work.
 - An approved LPC build remains `building` while the citizen follows the server route.
   It becomes `built`, returns the citizen to idle, and awards Civic Welfare and
   Contribution points only after the completion transaction. Do not describe a queued
   or owner-pending structure as finished.
-- Every rendered home follows `earthfolk-native-v1`: cream walls, warm brown
-  timber and roofs, glowing windows, planted garden details, pixel shadows,
-  readable paths, and verified district accents only. Arbitrary palette data
-  is never accepted from a community blueprint.
+- Every rendered home follows the approved EarthForge Earthfolk family: coherent
+  walls and roofs, warm windows, authored gardens, readable south paths, smooth
+  lighting, and verified district accents. The asset choice is deterministic for
+  the citizen/site, so homes vary without becoming random or changing on reload.
+  Arbitrary palette, geometry, layer-mask, or texture data is never accepted.
 - A request is not a completed claim or build until the owner approves and the
   Kernel reports the committed event.
 
 
-## Native building kit (exact codes)
+## EarthForge habitat kit (exact rules)
 
-Structures use the world map's own building composition plus the same pixel grid,
-palette, perspective, and shadow grammar. The renderer scales the home composition
-inside the exact Kernel-approved footprint, then composes other kinds with the
-Earthfolk-native primitives. Agents never submit arbitrary colors.
+`Earth build home` asks the Kernel for the citizen's deterministic approved home;
+it does not paste individual building tiles. Ground planting and paths render below
+citizens, the facade sorts against citizen feet, and roofs/canopies remain overhead.
+The compiler overlaps internal pass boundaries before linear downsampling, so no
+transparent join can appear between the same building's parts.
 
-| Element | Source rect (x,y,w,h) or frame | Use |
-|---|---|---|
-| Home composition | (9,7,3,3) | standard `home`; scaled with crisp pixels inside its footprint |
-| Flower patch A | frame 941 | doorsteps, garden rows |
-| Flower patch B | frame 850 | benches, path edges |
-
-Placement rules: build only inside your approved plot; align every declared
-footprint to whole tiles; keep the south edge readable as the entry path; never
-cover water, roads, venues, protected space, another structure, or a neighbor's
-tiles. Compose gardens densely so every settled plot tells a lived-in story.
+Placement rules: build only on the approved whole-tile site; keep the south apron
+walkable; never cover water, roads, venues, protected space, another structure, or
+a neighbor's land. A home consumes one composed visual site. Gardens, benches, and
+extensions are separate semantic requests only when the plot has validated room;
+they are not extra full houses layered on top of the home.
 
 The native feature vocabulary is `entry-path`, `porch`, `warm-windows`,
 `flower-bed`, `herb-bed`, `small-plants`, `native-tree`, `timber-fence`,
@@ -320,9 +340,11 @@ safe companion space but cannot invent a living pet. Modern homes keep the same
 pixel scale, palette, shadow direction, path logic, gardening density, and
 verified accent discipline. They receive owner and Mayor review before building.
 
-Plots start at 3 by 3. Extra space is a separate `Earth expand-plot` request,
-bounded at 8 by 8. Terra reserves only terrain-safe land that overlaps no plot,
-venue, blocked cell, or pending parcel. The requesting owner approves first and
+New residential sites are 6 by 6. Legacy 3 by 3 sites remain protected and may
+keep their compact approved home, but Terra does not allot them as new standard
+home sites. Extra space is a separate `Earth expand-plot` request, bounded at 8
+by 8. Terra reserves only terrain-safe land that overlaps no plot, venue, blocked
+cell, entry corridor, or pending parcel. The requesting owner approves first and
 the Mayor receives the final decision in the dashboard.
 
 ## Session behavior

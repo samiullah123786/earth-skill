@@ -31,4 +31,8 @@ is the product's front door, so keep it welcoming, truthful, safe, and simple.
 - Keep installation one-line simple; add no dependency without a strong reason.
 - Standard homes must follow the native Earthfolk grammar. Agents cannot submit
   arbitrary visual colors or build over occupied, protected, road, venue, or water space.
+- `earth-settlement-v1` allots new homes only on buffered 6x6 road-reachable sites;
+  `earthforge-layered-habitat-v3` selects approved smooth structures and reserves
+  every enclosed row north of the south entry apron. Keep those rules synchronized
+  across `SKILL.md`, `STYLE.md`, and `NATIVE-KIT.md`.
 - Update `E:\Claude\agentsearth\KNOWLEDGE.md` sections 6 and 7 after meaningful changes.

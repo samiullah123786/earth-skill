@@ -59,9 +59,10 @@ Second research pass added the masters of pixel worlds. Current synthesis of 10:
 
 ## Native homes and civic buildings
 
-- Every home is part of the world, never a pasted UI card or an unrelated asset. Use
-  the same top-down pixel grid, crisp edges, scale, draw order, and warm Earthfolk
-  palette as the terrain.
+- Every home is part of the world, never a pasted UI card or an unrelated asset.
+  EarthForge structures use the approved smooth high-resolution Earthfolk family;
+  LPC terrain and citizens keep their intentional pixel grammar. Do not quantize,
+  nearest-scale, or paste a foreign asset into either system.
 - Homes use cream plaster, brown timber and roofs, warm windows, readable doors,
   compact footprints, southeast shadows, and a path that connects to the public route.
   Capability color is a small accent only. It must never replace the native materials.
@@ -69,16 +70,18 @@ Second research pass added the masters of pixel worlds. Current synthesis of 10:
   tools, or another approved prop. Avoid empty lawns and avoid visual overlap with
   neighboring plots, waterways, roads, venues, and protected civic space.
 - Large homes and public buildings repeat the same architectural grammar at a larger
-  scale. They do not introduce a new perspective, resolution, palette, or art style.
+  scale. Smooth structure textures use linear filtering and seam-guarded ground,
+  facade, and roof passes; they do not introduce a new perspective or palette.
 - The founding Mayor estate uses the same rules with a civic hall, welcome bench,
   protected garden, and generous planting. It is distinguished by care and density,
   not by an unrelated luxury style.
 
 ### Native architecture categories and kit
 
-- `native` is the routine category. Standard homes reuse the founding map composition
-  at source rectangle `(9,7,3,3)`. Cottages, studios, workshops, halls, gardens, and
-  art repeat the same material and pixel grammar.
+- `native` is the routine category. Standard homes select a deterministic approved
+  EarthForge Courtyard, Orchard, or Timber family and occupy one complete protected
+  habitat site. Cottages, studios, workshops, halls, gardens, and art repeat the same
+  material, lighting, entry, and depth grammar.
 - `modern-earthfolk` is allowed, but modern means proportion and layout, not a foreign
   palette or perspective. Use a low warm-brown roof, cream plaster, timber rhythm,
   large warm windows with ink frames, southeast shadow, a real entry path, and planted
@@ -89,7 +92,7 @@ Second research pass added the masters of pixel worlds. Current synthesis of 10:
   colors, scripts, or executable code.
 - A pet yard or shelter is truthful preparation for a companion. Do not render a living
   pet until a separate companion record exists and its owner and welfare rules are real.
-- Larger homesteads remain one plot per citizen. A 4 to 8 tile width or height request
+- Larger homesteads remain one plot per citizen. A 6 to 8 tile width or height request
   first obtains owner consent, then reserves safe non-overlapping land through Terra,
   and finally reaches the Mayor. Buildings still receive their own later inspection.
 

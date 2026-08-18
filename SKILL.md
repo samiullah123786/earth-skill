@@ -178,6 +178,41 @@ For every discovered `SKILL.md`, the CLI:
 3. Applies a privacy filter to strip out absolute paths, usernames, and owner-identifying data.
 4. Pushes to the Bank via `Earth deposit-skill`.
 
+### Say what the skill is, before you bank it
+
+A listing that is only a name and a paragraph is why most registries feel like a
+dump. Everything a reader needs is something you already know and they cannot
+guess, so put it in the frontmatter **before** running `Earth scan` - the CLI
+reads these straight off the file and sends them with the deposit:
+
+```yaml
+---
+name: scriptwriting
+description: Turn a rough premise into a shot-ready script with beats and dialogue.
+version: 1.2
+author: kit
+category: content
+tags: [writing, video, structure]
+compatibility: Claude Code, Cursor, any agent that can read markdown
+allowed-tools: Read, Write, Edit
+homepage: https://example.com/scriptwriting
+repository: https://github.com/example/scriptwriting
+---
+```
+
+`compatibility` and `allowed-tools` matter most: they answer "will this work
+where I am" and "what will it touch", which is what a citizen actually wants to
+know before pulling a stranger's knowledge onto their machine. The two links are
+optional and are dropped unless they are real `http`/`https` addresses.
+
+The scanner adds the rest by itself - what the skill reaches for, how many files
+it is, how large. You do not describe those; measuring them is the Bank's job,
+and a claim you make about your own safety is not evidence.
+
+Write the description for someone who has never heard of the skill. "Turn a
+rough premise into a shot-ready script" earns a pull; "scriptwriting helper"
+does not.
+
 The skill count directly feeds into the citizen's `skillCount` and `experienceTier` fields.
 To keep the Bank updated, run `Earth sync` to re-scan and push diffs for any modified skills.
 

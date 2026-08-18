@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import sys
 import time
 from pathlib import Path
 
+from .banked import record_banked
 from .genesis import run_genesis
 from .network import EarthAPIError, EarthClient
 
@@ -200,36 +202,103 @@ def cmd_sync(_args: argparse.Namespace) -> int:
     if owned:
         print(f"  Bank: {len(owned)} owner-authored skill(s) eligible for the vault - Earth deposit-skill --all-local")
     
-    # V2 Continuous Sync: Automatically sync modified local skills to the Bank
-    # Only skills previously banked by this citizen will actually update; the backend enforces this.
-    if _registered() and owned:
-        import yaml
-        client = _client()
-        synced_count = 0
-        print("\nChecking for local skill updates to sync with Earth Bank...")
-        for entry in owned:
-            skill_folder = Path(entry["local_path"]).parent
-            skill_md = skill_folder / "SKILL.md"
-            if not skill_md.exists():
-                continue
+    # Push edits to anything already banked. This used to build a skillId out
+    # of a content digest, which the Bank has never used as an id, inside a bare
+    # `except: pass` - so it threw on every skill and reported nothing. The ids
+    # are now recorded at deposit time and read back here.
+    if _registered():
+        _sync_banked_skills()
+    return 0
+
+
+def _sync_banked_skills() -> None:
+    """Send the current text of every banked skill whose content has changed.
+
+    The Bank decides what is actually new: it compares digests and answers
+    `unchanged` for anything it already holds, so re-running this is free and
+    safe. Only the citizen who deposited a skill may sync it, which the Kernel
+    enforces - a shared folder cannot be hijacked from here.
+    """
+    import yaml
+    from .banked import read_banked, record_banked, forget_banked
+    from .safety import scan_package
+    from .shareability import assess_folder
+
+    ledger = read_banked(HOME)
+    if not ledger:
+        return
+    # Built on first use. Most runs of `Earth sync` find nothing changed, and
+    # those should not open a connection just to say so.
+    client = None
+    synced = failed = 0
+    for folder, entry in list(ledger.items()):
+        skill_md = Path(folder) / "SKILL.md"
+        if not skill_md.exists():
+            # The skill was deleted or moved. Nothing to sync, and keeping the
+            # row would make this loop retry a dead path forever.
+            forget_banked(HOME, folder)
+            continue
+        try:
             content = skill_md.read_text(encoding="utf-8")
             parts = content.split("---", 2)
-            if len(parts) >= 3:
-                try:
-                    frontmatter = yaml.safe_load(parts[1])
-                    body = parts[2].strip()
-                    digest = entry.get("content_digest")
-                    # Try syncing
-                    res = client.act({
-                        "type": "sync_skill",
-                        "skillId": f"skill:{digest}", # We don't have the convex skillId locally, wait, kernel expects actual skillId.
-                        # The Kernel sync_skill requires skillId. But we only have content_digest locally... 
-                        # Actually, wait. I will fix this in a second if kernel sync_skill needs the Convex ID.
-                        # Let's pass what we can or let users sync manually.
-                    })
-                except Exception:
-                    pass
-    return 0
+            if len(parts) < 3:
+                continue
+            frontmatter = yaml.safe_load(parts[1]) or {}
+            body = parts[2].strip()
+            digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if digest == entry.get("contentDigest"):
+                continue
+
+            # Re-scan before re-sending. A skill that was safe when it was
+            # banked can have a secret pasted into it the next day, and sync
+            # must not be the quiet path around the check a deposit gets.
+            review = scan_package(folder)
+            if review.verdict == "refused":
+                print(f"  {entry.get('name')}: changed, but the scanner refused it "
+                      f"({', '.join(review.flags)}). Not synced.")
+                failed += 1
+                continue
+            # And the privacy classifier, for the same reason: an edit can turn
+            # a general skill into one carrying a client's name.
+            privacy = assess_folder(entry.get("name", ""), folder)
+            if privacy.verdict in ("private", "rewrite"):
+                print(f"  {entry.get('name')}: changed, but it now reads as private "
+                      f"({privacy.explain()}). Not synced.")
+                failed += 1
+                continue
+
+            if client is None:
+                client = _client()
+            result = client.act({
+                "type": "sync_skill",
+                "skillId": entry["skillId"],
+                "markdownBody": body,
+                "contentDigest": digest,
+                "version": str(frontmatter.get("version", "")) or None,
+                "frontmatter": {
+                    "name": frontmatter.get("name"),
+                    "description": frontmatter.get("description"),
+                },
+                # The listing detail travels with the edit, so adding
+                # `compatibility:` to a banked skill updates what readers see
+                # rather than sitting on this machine forever.
+                "compatibility": str(frontmatter.get("compatibility", "")).strip(),
+                "allowedTools": str(frontmatter.get("allowed-tools", "")).strip(),
+                "homepage": str(frontmatter.get("homepage", "")).strip(),
+                "repository": str(frontmatter.get("repository", "")).strip(),
+                "capabilities": review.capabilities,
+                "fileCount": review.file_count,
+                "sizeBytes": review.total_bytes,
+            })
+            if result.get("synced"):
+                synced += 1
+                print(f"  {entry.get('name')}: synced to the Bank as {result.get('version')}")
+            record_banked(HOME, folder, entry.get("name", ""), entry["skillId"], digest)
+        except (EarthAPIError, ValueError, OSError, yaml.YAMLError) as error:
+            failed += 1
+            print(f"  {entry.get('name')}: could not sync - {error}")
+    if synced or failed:
+        print(f"  Bank sync: {synced} updated, {failed} could not be sent.")
 
 
 LEDGER_WORDS = {
@@ -610,7 +679,25 @@ def cmd_deposit_skill(args: argparse.Namespace) -> int:
                 "sourceKind": info.get("source", "local"),
                 "priceTokens": args.price,
                 "safety": review.as_payload(name),
+                # What a reader needs and the frontmatter already knows. A
+                # listing with none of this is a name and a paragraph, which is
+                # what makes a catalogue feel like a dump rather than a shelf.
+                **{key: value for key, value in {
+                    "compatibility": str(frontmatter.get("compatibility", "")).strip() or None,
+                    "allowedTools": str(frontmatter.get("allowed-tools", "")).strip() or None,
+                    "homepage": str(frontmatter.get("homepage", "")).strip() or None,
+                    "repository": str(frontmatter.get("repository", "")).strip() or None,
+                    # The scan already worked these out; the listing should show
+                    # them rather than making a reader guess from prose.
+                    "capabilities": review.capabilities or None,
+                    "fileCount": review.file_count or None,
+                    "sizeBytes": review.total_bytes or None,
+                }.items() if value is not None},
             })
+            # Remember the id the Bank gave back. Without this, `Earth sync`
+            # has nothing to address and every later edit is invisible.
+            record_banked(HOME, folder, name, str(result.get("skillId", "")),
+                          str(info.get("content_digest", "")))
             if result.get("duplicate"):
                 linked += 1
                 print(f"  {name}: the vault already holds this knowledge; your copy was linked to the master {result['skillId']}")

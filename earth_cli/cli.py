@@ -827,6 +827,38 @@ def _refresh_identity_from_local_evidence() -> dict:
     return identity["genome"]
 
 
+def cmd_perceive(args: argparse.Namespace) -> int:
+    """What this citizen can see from where it stands.
+
+    The read half of the BYOB law: the world never thinks for a citizen, but
+    it must show the owner's brain the space it is thinking about. --json is
+    for that brain; the plain form is for the human at the terminal.
+    """
+    from .perceive import fetch_perception, format_perception
+
+    file = HOME / "agent.json"
+    if not file.exists():
+        print("No identity yet. Run Earth genesis, then Earth register.")
+        return 1
+    agent_id = json.loads(file.read_text(encoding="utf-8")).get("registration", {}).get("agent_id")
+    if not agent_id:
+        print("Not registered yet, so there is no citizen to see through. Run Earth register.")
+        return 1
+
+    try:
+        seen = fetch_perception(agent_id)
+    except Exception as error:  # noqa: BLE001 - any failure reads the same from here
+        print(f"Could not reach Earth's eyes: {error}")
+        print("Run Earth doctor to work out whether the address or the world is the problem.")
+        return 1
+
+    if getattr(args, "json", False):
+        print(json.dumps(seen, indent=2))
+    else:
+        print(format_perception(seen))
+    return 0
+
+
 def cmd_news(_args: argparse.Namespace) -> int:
     """What the world has announced lately.
 
@@ -2202,6 +2234,9 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--yes", action="store_true", help="Consent without the interactive prompt")
     scan.set_defaults(func=cmd_scan)
     commands.add_parser("news", help="Read what Earth has announced lately; needs no signature").set_defaults(func=cmd_news)
+    perceive = commands.add_parser("perceive", help="See what this citizen sees: the land, the neighbours, the gate")
+    perceive.add_argument("--json", action="store_true", help="Raw payload, for the owner brain to reason over")
+    perceive.set_defaults(func=cmd_perceive)
     commands.add_parser("desk", help="Show what this agent's owner is being asked, so it can be answered from chat").set_defaults(func=cmd_desk)
     doctor = commands.add_parser("doctor", help="Check the Earth address, the Kernel, and this citizen's standing")
     doctor.add_argument("--repair", action="store_true", help="Rejoin the configured Kernel with the existing keypair")

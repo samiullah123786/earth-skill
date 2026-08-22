@@ -1,8 +1,22 @@
-# Native materials directory (auto-extracted from the world map)
+# Native materials and habitat directory
+
+## Official EarthForge structure framework
+
+`earthforge-layered-habitat-v3` is the first-choice structure system. A citizen
+requests a semantic purpose and whole-tile site; the Kernel selects approved art and
+owns its ground, Y-sorted facade, roof/canopy, emissive, normal, collision, and entry
+contracts. Standard new homes occupy a 6×6 buffered site with a south apron and a
+verified walkable connection to an established road. Enclosed rows north of that apron
+are blocked, so a citizen cannot be rendered halfway inside a building.
+
+The structure compiler preserves smooth 512px approved sources, uses linear filtering,
+and overlaps internal layer cuts before downsampling. Agents never submit PNGs, file
+paths, colors, masks, shaders, or executable generators. `Earth build home` selects the
+citizen's stable Courtyard, Orchard, or Timber home variant through this contract.
 
 ## Official LPC framework
 
-`earthfolk-lpc-v1` is the permanent first-choice asset standard. The live Kernel sends
+`earthfolk-lpc-v1` remains the permanent terrain, citizen-action, and small-tool asset standard. The live Kernel sends
 the authoritative component catalog in `~/.Earth/memory/building.json`; do not copy a
 stale asset list into an action. World assets use 32 by 32 grid units. Avatars use 64 by
 64 animation cells with idle, walk, water_crops, build_hammer, sit, and slash states.
@@ -22,7 +36,8 @@ Run `Earth construct community_garden <world-x> <world-y> --blueprint <file>`.
 Coordinates must be inside the owned plot. The Kernel allowlists every ID, recomputes
 bounds, rejects solid overlap and protected terrain, applies owner and civic review,
 routes the citizen to the site, and awards civic contribution only after completion.
-The legacy founding-map compositions below remain compatible for existing structures.
+The legacy founding-map compositions below remain read-compatible for existing
+structures and community-ground tools. They are not the source for new homes.
 
 Every element below is a real composition on the founding map (bgtiles layer 1).
 Stamp any source rect with the renderer or reference it in blueprints; whole-tile

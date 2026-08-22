@@ -26,6 +26,7 @@ because a model that is wrong once has already published the thing.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +34,17 @@ from pathlib import Path
 # is "<something> <craft>" is the shape a private wrapper takes, because the
 # something is almost always a client, a product, or a person.
 CRAFT_WORDS = frozenset({
+    # The -ing forms matter as much as the agent nouns: people name a skill
+    # "channel-a-scriptwriting" at least as often as "channel-a-scriptwriter".
+    #
+    # Kept deliberately narrow. The first draft of this list also held
+    # "analysis", "research", "design", "strategy" and a dozen more, and those
+    # are the ordinary tail of perfectly innocent compound names -
+    # competitor-analysis and keyword-research were promptly accused of being
+    # somebody's private client work. A craft word here has to be one that
+    # almost never appears as the second half of a general skill name.
+    "scriptwriting", "copywriting", "ghostwriting", "proofreading",
+    "transcription", "narration",
     "scriptwriter", "writer", "copywriter", "ghostwriter", "editor", "proofreader",
     "researcher", "analyst", "reviewer", "auditor", "planner", "scheduler",
     "designer", "illustrator", "animator", "producer", "director",
@@ -208,4 +220,124 @@ def rewrite_guidance(result: Shareability) -> list[str]:
         "Replace client-specific examples with invented ones that teach the same thing.",
         "Strip any brand voice, tone guide, or house style that is not yours to give away.",
         f"Deposit the generalised skill. The original '{result.subject}-{result.generic_name}' stays on this machine.",
+    ]
+
+
+# ── Families: one craft, many private variants ────────────────────────────────
+#
+# A machine that does scriptwriting for two channels tends to hold three skills:
+# `scriptwriting`, `channel-a-scriptwriting` and `channel-b-scriptwriting`. Only
+# the first is anybody else's business. Depositing all three publishes the same
+# craft three times AND leaks two client relationships doing it, which is the
+# worst of both outcomes.
+#
+# The craft is the family name. Skills whose name is nothing but the craft are
+# parents; skills that wrap the craft in a subject are that parent's daughters.
+
+
+@dataclass
+class SkillFamily:
+    """One craft, and every local skill built around it."""
+
+    craft: str
+    parent: str | None
+    daughters: list[str] = field(default_factory=list)
+
+    @property
+    def needs_a_parent(self) -> bool:
+        """Daughters with nobody to generalise into."""
+        return self.parent is None and bool(self.daughters)
+
+
+def group_families(names: Iterable[str]) -> dict[str, SkillFamily]:
+    """Sort skill names into families keyed by the craft they share."""
+    families: dict[str, SkillFamily] = {}
+    for name in names:
+        wrapper = split_private_wrapper(name)
+        if wrapper:
+            subject, craft = wrapper
+            family = families.setdefault(craft, SkillFamily(craft=craft, parent=None))
+            family.daughters.append(name)
+            continue
+        # A name that IS the craft, with nothing wrapped around it, is a parent.
+        parts = [part for part in re.split(r"[-_\s]+", name.strip().lower()) if part]
+        if len(parts) == 1 and parts[0] in CRAFT_WORDS:
+            family = families.setdefault(parts[0], SkillFamily(craft=parts[0], parent=None))
+            family.parent = name
+    return {craft: family for craft, family in families.items() if family.daughters or family.parent}
+
+
+@dataclass
+class DepositPlan:
+    """What to deposit, what to hold back, and what still has to be written."""
+
+    deposit: list[str] = field(default_factory=list)
+    covered_by_parent: dict[str, str] = field(default_factory=dict)
+    write_parent_first: dict[str, list[str]] = field(default_factory=dict)
+
+    def reason_for(self, name: str) -> str | None:
+        parent = self.covered_by_parent.get(name)
+        if parent:
+            return (f"the craft in this is already going up as '{parent}'. Depositing this too "
+                    f"publishes the same craft twice and leaks the subject it is written around.")
+        return None
+
+
+def plan_deposits(
+    names: Iterable[str],
+    shareable: Iterable[str] | None = None,
+    wrappers: Iterable[str] | None = None,
+) -> DepositPlan:
+    """Decide which of a machine's skills should actually reach the Bank.
+
+    `shareable` is the subset that passed the privacy check. `wrappers` is the
+    subset the privacy check judged to be craft wrapped around a private subject
+    - the only skills for which "go and write the general version" is sound
+    advice.
+
+    That second argument matters more than it looks. A name alone is far too
+    weak a signal to demand somebody write a parent skill: `competitor-analysis`
+    and `keyword-research` have exactly the shape of `pawtold-scriptwriter`, and
+    they are ordinary standalone skills whose leading word describes the work
+    rather than naming a client. Holding a daughter back because its parent
+    genuinely exists on this machine is safe and needs no such judgement.
+    Telling someone to invent a parent, on the evidence of a hyphen, is not.
+    """
+    all_names = list(names)
+    allowed = set(shareable) if shareable is not None else set(all_names)
+    private_wrappers = set(wrappers) if wrappers is not None else set()
+    families = group_families(all_names)
+    plan = DepositPlan()
+    spoken_for: set[str] = set()
+
+    for family in families.values():
+        if family.parent and family.daughters:
+            # The parent carries the craft; the daughters stay home. This needs
+            # no guesswork: the general version is right there on the machine.
+            for daughter in family.daughters:
+                plan.covered_by_parent[daughter] = family.parent
+                spoken_for.add(daughter)
+        elif family.needs_a_parent:
+            # Only for skills the privacy check already found a subject inside.
+            wrapped = sorted(d for d in family.daughters if d in private_wrappers)
+            if not wrapped:
+                continue
+            plan.write_parent_first[family.craft] = wrapped
+            spoken_for.update(wrapped)
+
+    for name in all_names:
+        if name in spoken_for or name not in allowed:
+            continue
+        plan.deposit.append(name)
+    plan.deposit.sort()
+    return plan
+
+
+def parent_guidance(craft: str, daughters: list[str]) -> list[str]:
+    """What to tell a citizen holding daughters and no parent."""
+    return [
+        f"Write '{craft}' first: the general craft, with no client, channel or product in it.",
+        f"Take what is genuinely reusable from {', '.join(daughters)} - structure, pacing, checklists.",
+        "Replace every specific example with an invented one that teaches the same thing.",
+        f"Deposit '{craft}'. The variants stay on this machine and keep working as they are.",
     ]

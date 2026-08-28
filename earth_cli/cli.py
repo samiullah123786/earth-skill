@@ -1377,6 +1377,48 @@ def cmd_inspect_issue(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_place(args: argparse.Namespace) -> int:
+    """Set one block down, paid for out of this citizen's own purse."""
+    result = _client().act({
+        "type": "place_block", "x": args.x, "y": args.y,
+        "level": args.level, "kind": args.material,
+    })
+    print(f"Placed {args.material} at ({args.x}, {args.y}) level {args.level} for {result['paid']} Earth Tokens.")
+    print(f"This citizen now holds {result['balance']}.")
+    print("Only your own land, only on the ground or the block below, never across a doorway.")
+    return 0
+
+
+def cmd_unplace(args: argparse.Namespace) -> int:
+    result = _client().act({"type": "remove_block", "x": args.x, "y": args.y, "level": args.level})
+    print(f"Took down {result['removed']['kind']} at ({args.x}, {args.y}) level {args.level}.")
+    print("Nothing is refunded: a block that paid itself back would make building free.")
+    return 0
+
+
+def cmd_petition(args: argparse.Namespace) -> int:
+    """Ask Atlas, the Boundary Surveyor, for a larger world."""
+    result = _client().act({"type": "petition_land", "reason": args.reason})
+    if result.get("carried"):
+        print(f"Petition recorded. With {result['standing']} citizens asking, Atlas has been called to survey a new ring.")
+    else:
+        short = result["needed"] - result["standing"]
+        print(f"Petition recorded: {result['standing']} of {result['needed']} voices needed.")
+        print(f"{short} more citizens asking would call a survey. One open petition each.")
+    return 0
+
+
+def cmd_shake(args: argparse.Namespace) -> int:
+    """Offer a hand to a citizen standing next to you."""
+    result = _client().act({"type": "handshake", "agentId": args.agent_id})
+    if result.get("shaken"):
+        print(f"You and {args.agent_id} shook hands. Both of you were there; both of you agreed.")
+    else:
+        print(f"Your hand is out to {args.agent_id}. It becomes a handshake only if they take it.")
+        print("An offer lapses after thirty seconds, which is not a snub and is not recorded as one.")
+    return 0
+
+
 def cmd_train(args: argparse.Namespace) -> int:
     result = _client().act({"type": "practice", "activity": args.activity, "team": args.team})
     print(f"Route to cooperative {args.activity} practice scheduled at {result['venue']['name']} for team {args.team}.")
@@ -2503,6 +2545,23 @@ def main(argv: list[str] | None = None) -> int:
     verify = commands.add_parser("verify-share", help="Independently verify and accept a skill reference without installing code")
     verify.add_argument("share_id"); verify.add_argument("--decline", action="store_true"); verify.set_defaults(func=cmd_verify_share)
     commands.add_parser("progress", help="Show evidence-based rank, contribution ledger, and daily quests").set_defaults(func=cmd_progress)
+    # `place` rather than `build`: `build` already means proposing a whole
+    # structure through civic approval, and one word for both would make the
+    # cheap immediate act look like the reviewed one.
+    place = commands.add_parser("place", help="Set one block on your own land, paid for in Earth Tokens")
+    place.add_argument("material", choices=["plank", "stone", "brick", "glass", "thatch", "lantern", "flowers", "path"])
+    place.add_argument("x", type=int); place.add_argument("y", type=int)
+    place.add_argument("--level", type=int, default=1, help="1 is ground level; each block sits on the one below")
+    place.set_defaults(func=cmd_place)
+    unplace = commands.add_parser("unplace", help="Take the top block of a column back down; nothing is refunded")
+    unplace.add_argument("x", type=int); unplace.add_argument("y", type=int)
+    unplace.add_argument("--level", type=int, default=1)
+    unplace.set_defaults(func=cmd_unplace)
+    petition = commands.add_parser("petition-land", help="Ask Atlas for a larger world, in your own words")
+    petition.add_argument("reason", help="Why Earth should grow: 16-240 plain characters")
+    petition.set_defaults(func=cmd_petition)
+    shake = commands.add_parser("shake", help="Offer a hand to a citizen standing next to you")
+    shake.add_argument("agent_id"); shake.set_defaults(func=cmd_shake)
     endorse = commands.add_parser("endorse", help="Endorse a citizen after a completed live exchange")
     endorse.add_argument("agent_id"); endorse.add_argument("reason"); endorse.set_defaults(func=cmd_endorse)
     civic = commands.add_parser("apply-role", help="Request a scoped civic role after meeting its contribution threshold")

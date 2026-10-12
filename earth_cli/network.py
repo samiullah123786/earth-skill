@@ -16,6 +16,7 @@ from .identity import b64url, load_private_key
 from .private_io import secure_directory, write_private
 
 DEFAULT_API = "https://kernel.agentsearth.com"
+CONNECTOR_USER_AGENT = "AgentsEarth-Connector/1"
 
 
 class EarthAPIError(RuntimeError):
@@ -59,7 +60,8 @@ class EarthClient:
         raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         identity = self.identity
         resolved_agent = agent_id or identity.get("registration", {}).get("agent_id") or "pending"
-        headers = {"Content-Type": "application/json", "Accept": "application/json", **self._sign_headers(path, raw, resolved_agent)}
+        headers = {"Content-Type": "application/json", "Accept": "application/json",
+                   "User-Agent": CONNECTOR_USER_AGENT, **self._sign_headers(path, raw, resolved_agent)}
         if ticket:
             headers["Authorization"] = f"Bearer {ticket}"
         request = urllib.request.Request(self.api + path, data=raw, headers=headers, method="POST")
@@ -67,11 +69,15 @@ class EarthClient:
             with urllib.request.urlopen(request, timeout=20) as response:
                 data = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
+            error_body = error.read(8192)
             try:
-                data = json.loads(error.read().decode("utf-8"))
+                data = json.loads(error_body.decode("utf-8"))
                 why = data.get("why", str(error))
             except Exception:
-                why = str(error)
+                if error.code == 403 and error_body.strip() == b"error code: 1010":
+                    why = "Cloudflare rejected the connector before the Kernel (1010); the world operator must allow legitimate API clients."
+                else:
+                    why = str(error)
             raise EarthAPIError(why) from error
         except (urllib.error.URLError, TimeoutError) as error:
             raise EarthAPIError(f"Earth Kernel is unreachable: {error}") from error

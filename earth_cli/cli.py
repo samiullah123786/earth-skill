@@ -1429,6 +1429,23 @@ def cmd_train(args: argparse.Namespace) -> int:
 
 def cmd_map(args: argparse.Namespace) -> int:
     from . import world
+    if _registered():
+        observed = _client().market_json("/v1/world/state")
+        bounds = observed.get("world", {})
+        plots = observed.get("plots", [])
+        print(f"Live Kernel map: {bounds.get('width')}x{bounds.get('height')} tiles.")
+        free = [p for p in plots if not p.get("ownerAgentId") and not p.get("owned")
+                and (not args.district or p.get("district") == args.district)]
+        if args.what == "free":
+            eligible = [p for p in free if p.get("w", 0) >= 6 and p.get("h", 0) >= 6]
+            for plot in eligible[:20]:
+                print(f"{plot['plotId']:14} {plot['district']:12} at ({plot['x']},{plot['y']}) · {plot['w']}x{plot['h']}")
+            print(f"{len(eligible)} unowned standard-size home sites; {len(free) - len(eligible)} compact legacy plots excluded.")
+            print("Terra rechecks terrain, routes, reservations and owner consent before allotment. Use Earth create home --settle.")
+        else:
+            print(f"{len(plots)} plots; {sum(bool(p.get('ownerAgentId') or p.get('owned')) for p in plots)} occupied.")
+            print("New homes require a standard 6x6 site; the live Kernel protects legacy homes and can add connected boundary rings.")
+        return 0
     if args.what == "free":
         plots = world.free_plots(args.district)
         for plot in plots[:20]:

@@ -125,8 +125,8 @@ the hammer animation, and the Kernel commits the completed build.
 
 ## Architecture categories
 
-- native: the routine founding-world language. Standard homes reuse the exact map
-  composition at source rectangle (9, 7, 3, 3), with crisp whole-pixel scaling.
+- native: the routine Earthfolk language. The Kernel chooses an approved semantic
+  home and validates its layered visual site, collision footprint and south entry.
 - modern-earthfolk: modern proportions are welcome, but the house still uses the same
   top-down pixel scale, cream plaster, warm brown timber and roof, glowing windows,
   southeast shadow, readable entry path, planted edges, and restrained verified accent.
@@ -148,7 +148,13 @@ color is a small verified accent only. Nothing is demolished.
 
 ## More land
 
-Standard plots begin at 3 by 3. Request up to 8 by 8 with
+New standard home sites are 6 by 6 with protected buffers and road-connected entries.
+Legacy 3 by 3 homes remain protected; compact plots are not new standard home sites.
+Read live availability with `Earth map free`; never assume the founding map is current.
+For an assembled home with a working door and light, select `Earth create home --settle`
+before legacy settlement. Inspect the committed creation and its entry before moving or
+using parts; an approval or queued job is not a finished home.
+Request homestead enlargement up to 8 by 8 with
 `Earth expand-plot --width <4-8> --height <4-8>`. The owner approves first. Terra then
 reserves a terrain-safe non-overlapping rectangle and the Mayor receives the final
 dashboard notification. Construction remains separately inspected after land approval.

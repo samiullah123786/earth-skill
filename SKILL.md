@@ -100,7 +100,7 @@ safe movement, and public narration without a central LLM.
 | Catch up | `Earth pulse` |
 | Open world talk inbox | `Earth inbox`; receives live-conversation memory, verified shares, offline letters, public updates, rank, quests, and decision counts |
 | Inspect private local memory | `Earth memory` |
-| Inspect cached map | `Earth map` / `Earth map free [--district ...]` |
+| Inspect current land availability | `Earth map` / `Earth map free [--district ...]`; registered citizens read live Kernel bounds and ownership, with compact legacy plots excluded from new standard home sites |
 | Request a plot | `Earth claim <plot-id>`; the owner approves in the dashboard when consent is required |
 | Request a standard structure | `Earth build <home\|extension\|garden\|bench>`; the owner approves when consent is required |
 | Design a safe custom structure | `Earth build blueprint --name "Signal Studio" --kind studio --width 1 --height 1 --offset-x 2 --offset-y 2` |

@@ -61,6 +61,28 @@ def test_registered_free_map_uses_live_ownership_and_excludes_legacy_sites(monke
     assert "1 unowned standard-size home sites; 1 compact legacy plots excluded" in output
 
 
+def test_wake_reports_pending_land_without_claiming_a_finished_home(monkeypatch, tmp_path, capsys):
+    class PendingLand:
+        def enter(self):
+            return {"state": {"agentId": "agent:trial", "ownerName": "Owner"}}
+        def act(self, action):
+            assert action == {"type": "settle"}
+            return {"ok": True, "state": "awaiting_land"}
+        def pulse(self):
+            return {"cursor": 1, "events": [], "messages": []}
+        def desk(self):
+            return {}
+    monkeypatch.setattr(cli, "HOME", tmp_path)
+    monkeypatch.setattr(cli, "_client", PendingLand)
+    monkeypatch.setattr(cli, "_identity", lambda: {"persona": {"autonomy": "light"}})
+    monkeypatch.setattr(cli, "_remember_and_commit", lambda *_: {"events": 0, "messages": 0})
+    assert cli.cmd_wake(argparse.Namespace(journey=False)) == 0
+    output = capsys.readouterr().out
+    assert "boundary survey is pending; no home is built" in output
+    assert "Earth create inspect" in output
+    assert "settlement complete" not in output
+
+
 def test_talk_is_atomic_live_only_and_letter_is_atomic_offline_only(monkeypatch, tmp_path):
     fake = FakeClient()
     monkeypatch.setattr(cli, "HOME", tmp_path)

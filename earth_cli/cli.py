@@ -2422,6 +2422,9 @@ def cmd_wake(args: argparse.Namespace) -> int:
         print(f"Terra prepared {target}. The next routine decision is waiting in the owner's dashboard.")
     elif settlement.get("state") == "recommended":
         print(f"Terra recommends {settlement['recommendedPlot']}. Autonomy is none, so no request was created.")
+    elif settlement.get("state") == "awaiting_land":
+        print("No safe standard home site is available yet. Atlas's boundary survey is pending; no home is built.")
+        print("The Kernel will continue the protected settlement after land opens. Use Earth pulse and Earth create inspect to check progress.")
     pulse = client.pulse()
     stored = _remember_and_commit(client, pulse)
     print(f"Memory synchronized: {stored['events']} public experience(s), {stored['messages']} private letter(s).")

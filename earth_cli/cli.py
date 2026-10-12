@@ -1498,6 +1498,81 @@ def cmd_build(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def cmd_create(args: argparse.Namespace) -> int:
+    """Use signed semantic creation actions; no local pretend-world fallback."""
+    from .creation import build_resumable, read_plan, recover_build, resume_job, validate_plan, watch_creation, settle_home_resumable
+    if args.create_command == "catalog":
+        from .creation import MATERIALS, SHAPES
+        print(json.dumps({"version": "earth-creation-v1", "shapes": sorted(SHAPES),
+                          "materials": sorted(MATERIALS), "circuits": ["switch", "and", "or", "not", "timer"],
+                          "behaviors": ["door", "light", "switch"], "limits": {"bytes": 32768, "parts": 128, "circuits": 32, "extent": 8, "height": 4},
+                          "units": {"horizontal": ["x", "z"], "vertical": "y", "step": .25},
+                          "authority": "Kernel preview validates support, collision, law and current cost"}, indent=2))
+        return 0
+    if not _registered():
+        raise ValueError("Creation requires a registered citizen. Run Earth register first.")
+    client = _client()
+    command = args.create_command
+    if command == "home" and args.settle:
+        if args.x is not None or args.y is not None:
+            raise ValueError("--settle chooses a protected plot; use ordinary home for explicit owned coordinates")
+        result = settle_home_resumable(client, HOME, args.job, args.name)
+        print(json.dumps(watch_creation(client, result, args.watch_seconds), ensure_ascii=False, indent=2))
+        return 0 if result.get("ok", True) else 1
+    if command == "home":
+        resumed = resume_job(client, HOME, args.job)
+        if resumed is not None:
+            print(json.dumps(watch_creation(client, resumed, args.watch_seconds), ensure_ascii=False, indent=2))
+            return 0 if resumed.get("ok", True) else 1
+    if command in {"recipe", "home"}:
+        action = {"type": "creation_recipe", "recipe": "starter-home"}
+        for key in ("name", "x", "y"):
+            if getattr(args, key, None) is not None:
+                action[key] = getattr(args, key)
+        result = client.act(action)
+        if command == "home":
+            plan = validate_plan(result.get("plan"))
+            preview = client.act({"type": "creation_preview", "plan": plan})
+            if not preview.get("valid"):
+                print(json.dumps(preview, ensure_ascii=False))
+                return 1
+            result = build_resumable(client, HOME, plan, job=args.job)
+            result = watch_creation(client, result, args.watch_seconds)
+    elif command in {"preview", "build", "extend"}:
+        plan = read_plan(args.plan)
+        if command == "preview":
+            result = client.act({"type": "creation_preview", "plan": plan})
+        else:
+            recovered = recover_build(client, HOME, plan, job=args.job, expected_revision=args.expected_revision,
+                                      creation_id=args.creation_id if command == "extend" else None)
+            if recovered is not None:
+                print(json.dumps(watch_creation(client, recovered, args.watch_seconds), ensure_ascii=False, indent=2))
+                return 0 if recovered.get("ok", True) else 1
+            preview_action = {"type": "creation_preview", "plan": plan}
+            if command == "extend":
+                preview_action.update(creationId=args.creation_id, expectedRevision=args.expected_revision)
+            preview = client.act(preview_action)
+            if not preview.get("valid"):
+                print(json.dumps(preview, ensure_ascii=False))
+                return 1
+            result = build_resumable(client, HOME, plan, job=args.job, expected_revision=args.expected_revision,
+                                     creation_id=args.creation_id if command == "extend" else None)
+            result = watch_creation(client, result, args.watch_seconds)
+    elif command == "inspect":
+        action = {"type": "creation_inspect"}
+        if args.creation_id:
+            action["creationId"] = args.creation_id
+        result = client.act(action)
+    elif command in {"pause", "resume"}:
+        result = client.act({"type": "creation_control", "creationId": args.creation_id,
+                             "command": command, "expectedRevision": args.expected_revision})
+    else:
+        result = client.act({"type": "creation_use", "creationId": args.creation_id,
+                             "partId": args.part_id, "event": args.event})
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0 if result.get("ok", True) and result.get("valid", True) else 1
+
+
 def cmd_demolish(args: argparse.Namespace) -> int:
     """Take down one of this citizen's own structures."""
     result = _client().act({"type": "demolish_structure", "buildId": args.build_id})
@@ -2698,6 +2773,47 @@ def main(argv: list[str] | None = None) -> int:
     live.add_argument("--interval", type=int, default=45, help="Heartbeat seconds, 30-60")
     live.add_argument("--minutes", type=int, default=0, help="Stop after this many minutes; 0 waits for Ctrl+C")
     live.set_defaults(func=cmd_live)
+    creation = commands.add_parser("create", help="Plan, preview, build, inspect and control declarative creations")
+    creation_commands = creation.add_subparsers(dest="create_command", required=True)
+    creation_commands.add_parser("catalog", help="Read local declarative vocabulary and limits; no private identity needed").set_defaults(func=cmd_create)
+    for name in ("recipe", "home"):
+        item = creation_commands.add_parser(name, help="Get a starter-home plan" if name == "recipe" else "Preview and submit a resumable starter home")
+        item.add_argument("--name")
+        item.add_argument("--x", type=int)
+        item.add_argument("--y", type=int)
+        if name == "home":
+            item.add_argument("--settle", action="store_true", help="Choose assembled settlement, claim protected land under consent, and build; use before legacy settlement")
+            item.add_argument("--job", default="starter-home", help="Stable local job label; default starter-home, reuse after interruption")
+            item.add_argument("--watch-seconds", type=int, choices=range(301), default=0, metavar="0..300")
+        item.set_defaults(func=cmd_create)
+    for name in ("preview", "build"):
+        item = creation_commands.add_parser(name)
+        item.add_argument("plan", help="Declarative earth-creation-v1 JSON file (maximum 32 KiB)")
+        if name == "build":
+            item.add_argument("--job")
+            item.add_argument("--expected-revision", type=int)
+            item.add_argument("--watch-seconds", type=int, choices=range(301), default=0, metavar="0..300")
+        item.set_defaults(func=cmd_create)
+    item = creation_commands.add_parser("inspect")
+    item.add_argument("creation_id", nargs="?")
+    item.set_defaults(func=cmd_create)
+    item = creation_commands.add_parser("extend", help="Append parts to an existing creation; original parts must be preserved")
+    item.add_argument("creation_id")
+    item.add_argument("plan", help="Complete revised plan JSON, preserving all existing parts")
+    item.add_argument("--revision", dest="expected_revision", type=int, required=True)
+    item.add_argument("--job")
+    item.add_argument("--watch-seconds", type=int, choices=range(301), default=0, metavar="0..300")
+    item.set_defaults(func=cmd_create)
+    for name in ("pause", "resume"):
+        item = creation_commands.add_parser(name)
+        item.add_argument("creation_id")
+        item.add_argument("--expected-revision", type=int, required=True, help="Revision returned by inspect; rejects stale changes")
+        item.set_defaults(func=cmd_create)
+    item = creation_commands.add_parser("use")
+    item.add_argument("creation_id")
+    item.add_argument("part_id")
+    item.add_argument("event", choices=["toggle", "open", "close"])
+    item.set_defaults(func=cmd_create)
     # Only genuinely unbuilt commands belong here. argparse lets a second
     # add_parser with the same name quietly replace the first, so listing an
     # implemented command here disables it without any error.

@@ -323,11 +323,13 @@ def test_no_command_is_registered_twice():
 
     from earth_cli import cli
 
-    registered: list[str] = []
+    registered: list[tuple[int, str]] = []
     original = argparse._SubParsersAction.add_parser
 
     def recording(self, name, **kwargs):
-        registered.append(name)
+        # Nested namespaces may reuse a name (create build vs build). Only
+        # duplicate registrations in the SAME subparser shadow a command.
+        registered.append((id(self), name))
         return original(self, name, **kwargs)
 
     argparse._SubParsersAction.add_parser = recording
@@ -338,7 +340,7 @@ def test_no_command_is_registered_twice():
     finally:
         argparse._SubParsersAction.add_parser = original
 
-    duplicates = {name for name in registered if registered.count(name) > 1}
+    duplicates = {name for namespace, name in registered if registered.count((namespace, name)) > 1}
     assert not duplicates, f"these commands are registered twice and shadow each other: {sorted(duplicates)}"
 
 

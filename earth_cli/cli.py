@@ -1513,29 +1513,38 @@ def cmd_demolish(args: argparse.Namespace) -> int:
 
 def cmd_construct(args: argparse.Namespace) -> int:
     if not _registered():
-        print("LPC construction requires a registered owner-bound citizen and an owned plot.")
+        print("Construction requires a registered owner-bound citizen and an owned plot.")
         return 1
-    if args.template:
-        blueprint = LPC_TEMPLATES[args.template]
-    else:
-        source = Path(args.blueprint).expanduser()
-        try:
-            decoded = json.loads(source.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as error:
-            raise ValueError(f"cannot read declarative LPC blueprint: {error}") from error
-        blueprint = decoded.get("blueprint") if isinstance(decoded, dict) else decoded
-    if not isinstance(blueprint, list) or not 1 <= len(blueprint) <= 64:
-        raise ValueError("an LPC blueprint must be a JSON list with 1 to 64 tile or prop placements")
-    result = _client().act({
-        "type": "construct_structure",
-        "structureType": args.structure_type,
+    asset_id = getattr(args, "asset_id", None)
+    model_id = getattr(args, "model_id", None)
+    action = {
+        "type": "construct_structure", "structureType": args.structure_type,
         "coordinates": {"x": args.x, "y": args.y},
-        "blueprint": blueprint,
-    })
+    }
+    if asset_id:
+        action["assetId"] = asset_id
+        if model_id:
+            action["modelId"] = model_id
+    else:
+        if model_id:
+            raise ValueError("--model-id requires a canonical --asset-id")
+        if args.template:
+            blueprint = LPC_TEMPLATES[args.template]
+        else:
+            source = Path(args.blueprint).expanduser()
+            try:
+                decoded = json.loads(source.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError(f"cannot read declarative LPC blueprint: {error}") from error
+            blueprint = decoded.get("blueprint") if isinstance(decoded, dict) else decoded
+        if not isinstance(blueprint, list) or not 1 <= len(blueprint) <= 64:
+            raise ValueError("an LPC blueprint must be a JSON list with 1 to 64 tile or prop placements")
+        action["blueprint"] = blueprint
+    result = _client().act(action)
     review = result.get("review") or {}
     if result.get("autoApproved"):
         committed = result.get("committed") or {}
-        print(f"LPC construction approved and scheduled: {committed.get('buildId', args.structure_type)}.")
+        print(f"Construction approved and scheduled: {committed.get('buildId', args.structure_type)}.")
         print("The citizen will walk to the site, build with the equipped hammer, and earn civic credit only after completion.")
     elif result.get("awaitingCivicReview"):
         print("The manifest and geometry checks passed. This exceptional structure is waiting for the Mayor.")
@@ -2593,16 +2602,18 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--architecture", choices=["native", "modern-earthfolk"], default="native")
     build.add_argument("--features", default="", help="Comma-separated native features; read ~/.Earth/memory/BUILDING.md")
     build.set_defaults(func=cmd_build)
-    construct = commands.add_parser("construct", help="Submit a 32px LPC manifest blueprint through signed Kernel validation")
+    construct = commands.add_parser("construct", help="Submit a canonical structure or LPC blueprint through signed Kernel validation")
     construct.add_argument("structure_type", choices=[
         "community_garden", "cottage", "farm_plot", "park", "road_segment",
-        "workshop", "industrial_structure",
+        "workshop", "industrial_structure", "home", "library", "hall", "greenhouse", "bank", "data_center",
     ])
     construct.add_argument("x", type=int, help="Absolute world-grid x coordinate inside the owned plot")
     construct.add_argument("y", type=int, help="Absolute world-grid y coordinate inside the owned plot")
     construction_source = construct.add_mutually_exclusive_group(required=True)
     construction_source.add_argument("--template", choices=sorted(LPC_TEMPLATES), help="Use a bundled safe starter blueprint")
     construction_source.add_argument("--blueprint", help="Read a declarative JSON placement list; no code is executed")
+    construction_source.add_argument("--asset-id", help="Canonical EarthForge asset ID; the Kernel validates its kind and footprint")
+    construct.add_argument("--model-id", help="Approved modular 3D model paired with --asset-id; never a URL")
     construct.set_defaults(func=cmd_construct)
     demolish = commands.add_parser("demolish", help="Take down one of your own structures to rebuild")
     demolish.add_argument("build_id"); demolish.set_defaults(func=cmd_demolish)

@@ -164,6 +164,29 @@ def test_construct_sends_only_declarative_lpc_manifest_placements(monkeypatch, t
     assert all("tile" in row or "prop" in row for row in fake.actions[-1]["blueprint"])
 
 
+def test_construct_sends_canonical_model_through_signed_client(monkeypatch):
+    fake = FakeClient()
+    monkeypatch.setattr(cli, "_registered", lambda: True)
+    monkeypatch.setattr(cli, "_client", lambda: fake)
+    assert cli.cmd_construct(argparse.Namespace(
+        structure_type="home", x=140, y=85, template=None, blueprint=None,
+        asset_id="home_courtyard", model_id="home-a",
+    )) == 0
+    assert fake.actions[-1] == {
+        "type": "construct_structure", "structureType": "home",
+        "coordinates": {"x": 140, "y": 85}, "assetId": "home_courtyard", "modelId": "home-a",
+    }
+
+
+def test_modular_model_requires_canonical_asset(monkeypatch):
+    monkeypatch.setattr(cli, "_registered", lambda: True)
+    with pytest.raises(ValueError, match="requires a canonical"):
+        cli.cmd_construct(argparse.Namespace(
+            structure_type="home", x=1, y=2, template=None, blueprint=None,
+            asset_id=None, model_id="home-a",
+        ))
+
+
 def test_live_presence_rejects_an_interval_longer_than_the_kernel_lease(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "HOME", tmp_path)
     with pytest.raises(ValueError, match="30-60"):

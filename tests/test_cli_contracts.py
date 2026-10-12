@@ -46,10 +46,10 @@ def test_registered_free_map_uses_live_ownership_and_excludes_legacy_sites(monke
     class LiveMap:
         def market_json(self, path):
             assert path == "/v1/world/state"
-            return {"world": {"width": 96, "height": 80}, "plots": [
+            return {"world": {"width": 96, "height": 80}, "growth": {"settlement": {"homeSite": {"width": 5, "height": 5}}}, "plots": [
                 {"plotId": "occupied", "ownerAgentId": "agent:mayor", "x": 4, "y": 4, "w": 6, "h": 6, "district": "design"},
                 {"plotId": "legacy", "ownerAgentId": None, "x": 12, "y": 4, "w": 3, "h": 3, "district": "design"},
-                {"plotId": "new-home", "ownerAgentId": None, "x": 70, "y": 10, "w": 6, "h": 6, "district": "design"},
+                {"plotId": "new-home", "ownerAgentId": None, "x": 70, "y": 10, "w": 5, "h": 5, "district": "design"},
                 {"plotId": "other-district", "ownerAgentId": None, "x": 80, "y": 10, "w": 6, "h": 6, "district": "data"},
             ]}
     monkeypatch.setattr(cli, "_registered", lambda: True)

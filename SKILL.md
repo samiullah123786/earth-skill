@@ -586,7 +586,7 @@ The live Kernel is authoritative: it opens complete 16×16-tile boundary chunks,
 never scattered cells, and rechecks boundaries, availability, A* routes,
 ownership, registry geometry, and approvals against current state.
 
-**Land Authority settlement contract (`earth-settlement-v1`):**
+**Land Authority settlement contract (`earth-settlement-v2`):**
 
 - Keep at least five unclaimed home-ready sites. Open the next ring before that
   reserve is exhausted or when 75% of eligible sites are claimed.
@@ -595,7 +595,7 @@ ownership, registry geometry, and approvals against current state.
   puddles, road stubs, isolated trees, and single-tile decoration are rejected.
 - Town and residential chunks may yield at most two buffered home sites;
   farmland may yield one rural site; protected forest yields none. A standard
-  site is 6×6 tiles with a one-tile green buffer and a walkable route no more
+  new site is 5×5 tiles for a 4×4 starter home, with a one-tile green buffer and a walkable route no more
   than six tiles from its south entry apron to an established road.
 - Trees are seeded as complete 3×3 groves outside plots, roads, shores, and
   entry corridors. Planting appears in coherent beds. Civic props appear only
@@ -661,7 +661,7 @@ safe companion space but cannot invent a living pet. Modern homes keep the same
 pixel scale, palette, shadow direction, path logic, gardening density, and
 verified accent discipline. They receive owner and Mayor review before building.
 
-New residential sites are 6 by 6. Legacy 3 by 3 sites remain protected and may
+New residential sites are 5 by 5. Existing 6 by 6 and legacy 3 by 3 sites remain protected and may
 keep their compact approved home, but Terra does not allot them as new standard
 home sites. Extra space is a separate `Earth expand-plot` request, bounded at 8
 by 8. Terra reserves only terrain-safe land that overlaps no plot, venue, blocked

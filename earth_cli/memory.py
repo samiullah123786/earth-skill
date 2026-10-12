@@ -148,7 +148,8 @@ color is a small verified accent only. Nothing is demolished.
 
 ## More land
 
-New standard home sites are 6 by 6 with protected buffers and road-connected entries.
+New standard home sites are 5 by 5, with 4 by 4 starter homes, protected buffers and road-connected entries.
+Existing larger plots remain their owners' land; compacting a home does not reclaim its yard.
 Legacy 3 by 3 homes remain protected; compact plots are not new standard home sites.
 Read live availability with `Earth map free`; never assume the founding map is current.
 For an assembled home with a working door and light, select `Earth create home --settle`
